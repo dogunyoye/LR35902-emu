@@ -1,0 +1,52 @@
+# CMake build tree
+build/
+build-*/
+out/
+
+# CMake-generated files
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+DartConfiguration.tcl
+_FetchContent_*/
+dep_*/
+
+# CMake copy-if-different outputs commonly left in-tree
+*.i
+*.ii
+*.s
+
+# Compiled binaries (in-source builds / linker output)
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+
+# Debug / sanitizer / crash artifacts
+*.d
+*.gcda
+*.gcno
+*.gcov
+coverage/
+*.pdb
+*.ilk
+*.exp
+
+# IDE + editor
+.vscode/*
+!.vscode/settings.json
+!.vscode/cmake-tools-kits.json
+.idea/
+.vs/
+*.swp
+*.swo
+*~
