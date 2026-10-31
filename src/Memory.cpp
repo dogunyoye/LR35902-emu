@@ -9,6 +9,8 @@ const uint16_t ECHO_START = 0xE000;
 const uint16_t ECHO_END = 0xFDFF;
 const uint16_t OAM_START = 0xFE00;
 const uint16_t OAM_END = 0xFE9F;
+const uint16_t OAM_UNUSABLE_START = 0xFEA0;
+const uint16_t OAM_UNUSABLE_END = 0xFEFF;
 const uint16_t IO_START = 0xFF00;
 const uint16_t IO_END = 0xFF7F;
 const uint16_t HRAM_START = 0xFF80;
@@ -33,6 +35,11 @@ uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
     }
 
     if (address >= OAM_START && address <= OAM_END && cpu.oam_locked)
+    {
+        return 0xFF;
+    }
+
+    if (address >= OAM_UNUSABLE_START && address <= OAM_UNUSABLE_END)
     {
         return 0xFF;
     }
@@ -69,6 +76,11 @@ void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
     }
 
     if (address >= OAM_START && address <= OAM_END && cpu.oam_locked)
+    {
+        return;
+    }
+
+    if (address >= OAM_UNUSABLE_START && address <= OAM_UNUSABLE_END)
     {
         return;
     }

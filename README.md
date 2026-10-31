@@ -18,7 +18,7 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | Interrupt dispatch, priority, delayed EI, and HALT wake-up | :white_check_mark: done |
 | Cycle-driven CPU and timer stepping | :white_check_mark: done |
 | Approximate variable mode-3 timing, BG/window/sprite rendering, VBlank and STAT interrupts | :white_check_mark: done |
-| Regression tests for CPU, timer, interrupt, cartridge, and PPU behavior | :white_check_mark: done |
+| Regression tests for CPU, timer, interrupt, cartridge, memory, and PPU behavior | :white_check_mark: done |
 | CLI runner with cycle-driven frames and ROM-only loading | :white_check_mark: done |
 | Cycle-exact CPU and peripheral conformance | :soon: planned |
 | MBC emulation / cartridge banking | :soon: planned |
@@ -36,7 +36,7 @@ cmake --build build
 This generates:
 
 - the static library: `build/liblr35902.a`
-- test executables: `build/cpu_tests`, `build/timer_tests`, `build/cartridge_tests`, and `build/ppu_tests`
+- test executables: `build/cpu_tests`, `build/timer_tests`, `build/cartridge_tests`, `build/memory_tests`, and `build/ppu_tests`
 - the emulator CLI: `build/lr35902-emu`
 
 ### Debug builds
@@ -87,6 +87,7 @@ Show usage/help:
 │   ├── cpu_tests.cpp        # CPU instructions, flags, and interrupts
 │   ├── timer_tests.cpp      # Timer register behavior
 │   ├── cartridge_tests.cpp  # ROM-only cartridge loading and mapping
+│   ├── memory_tests.cpp     # Memory-bus address behavior
 │   └── ppu_tests.cpp        # PPU modes, scanlines, window, and sprites
 └── build/               # Generated CMake build output
 ```
