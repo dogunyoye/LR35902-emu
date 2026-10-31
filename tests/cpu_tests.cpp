@@ -79,6 +79,26 @@ static void test_inc_dec_registers()
     assert(cpu.pc == 0x0003);
 }
 
+static void test_inc_dec_preserve_carry()
+{
+    CPU_LR35902 cpu{};
+    cpu.bc.reg8.high = 0x0F;
+    set_flag(cpu, FLAG_C, true);
+    cpu.memory[0] = 0x04; // INC B
+    cpu.memory[1] = 0x05; // DEC B
+
+    assert(execute_instruction(cpu) == 4);
+    assert(cpu.bc.reg8.high == 0x10);
+    assert(get_flag(cpu, FLAG_C));
+    assert(get_flag(cpu, FLAG_H));
+
+    assert(execute_instruction(cpu) == 4);
+    assert(cpu.bc.reg8.high == 0x0F);
+    assert(get_flag(cpu, FLAG_C));
+    assert(get_flag(cpu, FLAG_N));
+    assert(get_flag(cpu, FLAG_H));
+}
+
 static void test_add_hl_registers()
 {
     CPU_LR35902 cpu{};
@@ -515,6 +535,7 @@ int main()
     test_load_and_add();
     test_stack_and_loads();
     test_inc_dec_registers();
+    test_inc_dec_preserve_carry();
     test_add_hl_registers();
     test_flag_behavior_add_sub();
     test_decimal_adjust();

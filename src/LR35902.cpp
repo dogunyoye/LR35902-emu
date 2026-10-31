@@ -161,7 +161,7 @@ namespace
 
     void apply_inc_flags(CPU_LR35902 &cpu, uint8_t old_value, uint8_t new_value, bool update_accumulator = false)
     {
-        cpu.af.reg8.low = 0;
+        cpu.af.reg8.low &= FLAG_C;
         set_z_flag(cpu, (new_value == 0));
         set_n_flag(cpu, false);
         set_h_flag(cpu, (((old_value & 0x0F) + 1) > 0x0F));
@@ -173,7 +173,7 @@ namespace
 
     void apply_dec_flags(CPU_LR35902 &cpu, uint8_t old_value, uint8_t new_value, bool update_accumulator = false)
     {
-        cpu.af.reg8.low = 0;
+        cpu.af.reg8.low &= FLAG_C;
         set_z_flag(cpu, (new_value == 0));
         set_n_flag(cpu, true);
         set_h_flag(cpu, ((old_value & 0x0F) < 1));
