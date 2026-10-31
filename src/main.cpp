@@ -119,7 +119,7 @@ namespace
         }
 
         std::vector<uint8_t> rom((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        return load_rom_only_cartridge(cpu, std::move(rom), error);
+        return load_cartridge(cpu, std::move(rom), error);
     }
 
     void update_joypad_from_key(CPU_LR35902 &cpu, SDL_Keycode key, bool pressed)

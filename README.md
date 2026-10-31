@@ -11,7 +11,7 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | CPU register model (AF/BC/DE/HL, SP, PC, IME) | :white_check_mark: done |
 | 64 KB flat memory space + read/write routing | :white_check_mark: done |
 | WRAM echo (0xE000–0xFDFF) | :white_check_mark: done |
-| ROM-only cartridge (32 KiB, header validated, write protected) | :white_check_mark: done |
+| ROM-only and MBC1 cartridges (banked ROM and RAM) | :white_check_mark: done |
 | VRAM/OAM access locking during PPU modes | :white_check_mark: done |
 | Legal base and CB-prefixed opcode implementations | :white_check_mark: done |
 | Timer registers (DIV/TIMA/TMA/TAC) and update logic | :white_check_mark: done |
@@ -22,7 +22,7 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | Regression tests for CPU, timer, interrupt, joypad, cartridge, memory, and PPU behavior | :white_check_mark: done |
 | CLI runner with cycle-driven frames and ROM-only loading | :white_check_mark: done |
 | Cycle-exact CPU and peripheral conformance | :soon: planned |
-| MBC emulation / cartridge banking | :soon: planned |
+| MBC5 and other mapper emulation | :soon: planned |
 | Full PPU and hardware fidelity | :soon: planned |
 
 ## Building
@@ -63,7 +63,7 @@ Run the demo program:
 ./build/lr35902-emu
 ```
 
-Run a 32 KiB ROM-only cartridge image (header type 0x00, ROM size code 0x00):
+Run a supported ROM-only (32 KiB) or MBC1 cartridge image:
 
 ```sh
 ./build/lr35902-emu /path/to/game.gb
@@ -88,14 +88,14 @@ Show usage/help:
 ├── src/
 │   ├── LR35902.cpp      # Instruction decoder, flags, interrupt stepping
 │   ├── Memory.cpp       # Memory routing and access rules
-│   ├── Cartridge.cpp    # ROM-only cartridge validation and setup
+│   ├── Cartridge.cpp    # ROM-only/MBC1 validation, setup, and bank state
 │   ├── PPU.cpp          # LCD modes, scanlines, and BG/window/sprite composition
 │   ├── Timer.cpp        # Divider/timer register updates
 │   └── main.cpp         # CLI entry point and demo runner
 ├── tests/
 │   ├── cpu_tests.cpp        # CPU instructions, flags, and interrupts
 │   ├── timer_tests.cpp      # Timer register behavior
-│   ├── cartridge_tests.cpp  # ROM-only cartridge loading and mapping
+│   ├── cartridge_tests.cpp  # ROM-only/MBC1 loading, bank, and RAM behavior
 │   ├── memory_tests.cpp     # Memory-bus address behavior
 │   ├── joypad_tests.cpp     # JOYP selection and interrupt behavior
 │   └── ppu_tests.cpp        # PPU modes, scanlines, window, and sprites

@@ -34,9 +34,14 @@ struct CPU_LR35902
 
     // Memory routing state.
     bool cart_ram_enabled = false;
+    bool cartridge_mbc1 = false;
+    uint8_t mbc1_rom_bank_low = 1;
+    uint8_t mbc1_bank_high = 0;
+    uint8_t mbc1_banking_mode = 0;
     bool vram_locked = false;
     bool oam_locked = false;
     std::vector<uint8_t> cartridge_rom;
+    std::vector<uint8_t> cartridge_ram;
 
     // 64KB Flat Address Space (will be replaced later with custom read/write routers)
     std::array<uint8_t, 65536> memory;
@@ -88,3 +93,4 @@ void cpu_push16(CPU_LR35902 &cpu, uint16_t val);
 uint16_t cpu_pop16(CPU_LR35902 &cpu);
 void update_timers(CPU_LR35902 &cpu, int cycles);
 bool load_rom_only_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error);
+bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error);

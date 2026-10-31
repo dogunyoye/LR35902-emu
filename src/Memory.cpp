@@ -20,6 +20,36 @@ const uint16_t JOYP_REG = 0xFF00;
 
 namespace
 {
+    uint8_t read_cartridge_rom(const CPU_LR35902 &cpu, uint16_t address)
+    {
+        const std::size_t bank_count = cpu.cartridge_rom.size() / 0x4000;
+        std::size_t bank = 0;
+        if (address < 0x4000)
+        {
+            if (cpu.cartridge_mbc1 && cpu.mbc1_banking_mode != 0)
+            {
+                bank = static_cast<std::size_t>(cpu.mbc1_bank_high) << 5;
+            }
+        }
+        else if (cpu.cartridge_mbc1)
+        {
+            bank = (static_cast<std::size_t>(cpu.mbc1_bank_high) << 5) | cpu.mbc1_rom_bank_low;
+        }
+        else
+        {
+            bank = 1;
+        }
+
+        bank %= bank_count;
+        return cpu.cartridge_rom[bank * 0x4000 + (address & 0x3FFF)];
+    }
+
+    std::size_t cartridge_ram_index(const CPU_LR35902 &cpu, uint16_t address)
+    {
+        const std::size_t bank = cpu.mbc1_banking_mode != 0 ? cpu.mbc1_bank_high : 0;
+        return (bank * 0x2000 + (address - 0xA000)) % cpu.cartridge_ram.size();
+    }
+
     uint8_t joypad_lines(const CPU_LR35902 &cpu)
     {
         const uint8_t select = cpu.memory[JOYP_REG] & 0x30;
@@ -54,7 +84,16 @@ uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
 
     if (address < 0x8000 && !cpu.cartridge_rom.empty())
     {
-        return cpu.cartridge_rom[address];
+        return read_cartridge_rom(cpu, address);
+    }
+
+    if (address >= 0xA000 && address < 0xC000 && !cpu.cartridge_rom.empty())
+    {
+        if (!cpu.cartridge_mbc1 || !cpu.cart_ram_enabled || cpu.cartridge_ram.empty())
+        {
+            return 0xFF;
+        }
+        return cpu.cartridge_ram[cartridge_ram_index(cpu, address)];
     }
 
     if (address == JOYP_REG)
@@ -101,12 +140,44 @@ void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
     {
         if (!cpu.cartridge_rom.empty())
         {
+            if (cpu.cartridge_mbc1)
+            {
+                if (address < 0x2000)
+                {
+                    cpu.cart_ram_enabled = !cpu.cartridge_ram.empty() && (value & 0x0F) == 0x0A;
+                }
+                else if (address < 0x4000)
+                {
+                    cpu.mbc1_rom_bank_low = value & 0x1F;
+                    if (cpu.mbc1_rom_bank_low == 0)
+                    {
+                        cpu.mbc1_rom_bank_low = 1;
+                    }
+                }
+                else if (address < 0x6000)
+                {
+                    cpu.mbc1_bank_high = value & 0x03;
+                }
+                else
+                {
+                    cpu.mbc1_banking_mode = value & 0x01;
+                }
+            }
             return;
         }
 
         if ((address & 0x1FFF) == 0x0000)
         {
             cpu.cart_ram_enabled = (value & 0x0F) == 0x0A;
+        }
+        return;
+    }
+
+    if (address >= 0xA000 && address < 0xC000 && !cpu.cartridge_rom.empty())
+    {
+        if (cpu.cartridge_mbc1 && cpu.cart_ram_enabled && !cpu.cartridge_ram.empty())
+        {
+            cpu.cartridge_ram[cartridge_ram_index(cpu, address)] = value;
         }
         return;
     }
