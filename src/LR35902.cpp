@@ -383,6 +383,14 @@ namespace
         (void)op_group;
     }
 
+    void apply_hl_add_flags(CPU_LR35902 &cpu, uint16_t lhs, uint16_t rhs)
+    {
+        const uint32_t total = static_cast<uint32_t>(lhs) + static_cast<uint32_t>(rhs);
+        set_n_flag(cpu, false);
+        set_h_flag(cpu, (((lhs & 0x0FFFu) + (rhs & 0x0FFFu)) > 0x0FFFu));
+        set_c_flag(cpu, total > 0xFFFFu);
+    }
+
     uint8_t signed_e8_to_u8(uint8_t value)
     {
         return static_cast<uint8_t>(value);
@@ -460,6 +468,12 @@ int execute_instruction(CPU_LR35902 &cpu)
         cycles = 4;
         break;
     }
+
+    case 0x09: // ADD HL, BC
+        cpu.hl.reg16 = static_cast<uint16_t>(cpu.hl.reg16 + cpu.bc.reg16);
+        apply_hl_add_flags(cpu, cpu.hl.reg16 - cpu.bc.reg16, cpu.bc.reg16);
+        cycles = 8;
+        break;
 
     case 0x02: // LD (BC), A
         cpu_write(cpu, cpu.bc.reg16, cpu.af.reg8.high);
@@ -569,6 +583,7 @@ int execute_instruction(CPU_LR35902 &cpu)
 
     case 0x19: // ADD HL, DE
         cpu.hl.reg16 = static_cast<uint16_t>(cpu.hl.reg16 + cpu.de.reg16);
+        apply_hl_add_flags(cpu, cpu.hl.reg16 - cpu.de.reg16, cpu.de.reg16);
         cycles = 8;
         break;
 
@@ -679,6 +694,7 @@ int execute_instruction(CPU_LR35902 &cpu)
 
     case 0x29: // ADD HL, HL
         cpu.hl.reg16 = static_cast<uint16_t>(cpu.hl.reg16 + cpu.hl.reg16);
+        apply_hl_add_flags(cpu, cpu.hl.reg16 - cpu.hl.reg16, cpu.hl.reg16);
         cycles = 8;
         break;
 
@@ -712,6 +728,12 @@ int execute_instruction(CPU_LR35902 &cpu)
         cpu.sp = cpu_read16(cpu, cpu.pc);
         cpu.pc += 2;
         cycles = 12;
+        break;
+
+    case 0x39: // ADD HL, SP
+        cpu.hl.reg16 = static_cast<uint16_t>(cpu.hl.reg16 + cpu.sp);
+        apply_hl_add_flags(cpu, cpu.hl.reg16 - cpu.sp, cpu.sp);
+        cycles = 8;
         break;
 
     case 0x32: // LD (HL-), A

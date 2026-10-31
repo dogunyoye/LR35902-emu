@@ -79,10 +79,43 @@ static void test_inc_dec_registers()
     assert(cpu.pc == 0x0003);
 }
 
+static void test_add_hl_registers()
+{
+    CPU_LR35902 cpu{};
+    cpu.memory[0x0000] = 0x21; // LD HL, d16
+    cpu.memory[0x0001] = 0x00;
+    cpu.memory[0x0002] = 0x10;
+    cpu.memory[0x0003] = 0x01; // LD BC, d16
+    cpu.memory[0x0004] = 0x34;
+    cpu.memory[0x0005] = 0x12;
+    cpu.memory[0x0006] = 0x09; // ADD HL, BC
+    cpu.memory[0x0007] = 0x31; // LD SP, d16
+    cpu.memory[0x0008] = 0x05;
+    cpu.memory[0x0009] = 0x00;
+    cpu.memory[0x000A] = 0x39; // ADD HL, SP
+    cpu.pc = 0x0000;
+
+    execute_instruction(cpu);
+    assert(cpu.hl.reg16 == 0x1000);
+
+    execute_instruction(cpu);
+    assert(cpu.bc.reg16 == 0x1234);
+
+    execute_instruction(cpu);
+    assert(cpu.hl.reg16 == 0x2234);
+
+    execute_instruction(cpu);
+    assert(cpu.sp == 0x0005);
+
+    execute_instruction(cpu);
+    assert(cpu.hl.reg16 == 0x2239);
+}
+
 int main()
 {
     test_load_and_add();
     test_stack_and_loads();
     test_inc_dec_registers();
+    test_add_hl_registers();
     return 0;
 }
