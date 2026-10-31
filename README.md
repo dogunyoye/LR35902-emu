@@ -1,19 +1,25 @@
 # LR35902 Emu
 
-A cycle-accurate [Sharp LR35902](https://gbdev.io/pandocs/CPU.html) (Game Boy) CPU emulator written in C++20.
+A small [Sharp LR35902](https://gbdev.io/pandocs/CPU.html) (Game Boy) CPU emulator written in C++20.
 
 ## Status
 
-:construction: **Work in progress** — the CPU/memory core is being built out.
+This project is still a work in progress, but the basic CPU core, memory routing, timer support, and CLI runner are in place.
 
 | Component | State |
 |---|---|
 | CPU register model (AF/BC/DE/HL, SP, PC, IME) | :white_check_mark: done |
-| 64 KB flat memory space + basic read/write routing | :white_check_mark: done |
+| 64 KB flat memory space + read/write routing | :white_check_mark: done |
 | WRAM echo (0xE000–0xFDFF) | :white_check_mark: done |
-| MBC (memory bank controller) banking | :soon: planned |
-| VRAM/OAM access locking during PPU modes | :soon: planned |
-| Instruction set / cycle decoder | :soon: planned |
+| ROM write protection / cartridge RAM enable | :white_check_mark: done |
+| VRAM/OAM access locking during PPU modes | :white_check_mark: done |
+| Core instruction decode (loads, arithmetic, jumps, stack, CB-prefixed opcodes) | :white_check_mark: partial |
+| Timer registers (DIV/TIMA/TMA/TAC) and update logic | :white_check_mark: done |
+| Regression tests for core CPU/timer behavior | :white_check_mark: done |
+| CLI runner with demo mode and ROM loading | :white_check_mark: done |
+| Full LR35902 instruction coverage | :soon: planned |
+| MBC emulation / cartridge banking | :soon: planned |
+| Full PPU and hardware fidelity | :soon: planned |
 
 ## Building
 
@@ -24,25 +30,57 @@ cmake -B build
 cmake --build build
 ```
 
-This produces the static library `build/liblr35902.a`. Once `src/main.cpp` exists, a `lr35902-emu` executable target builds automatically.
+This generates:
+
+- the static library: `build/liblr35902.a`
+- the test executable: `build/cpu_tests`
+- the emulator CLI: `build/lr35902-emu`
 
 ### Debug builds
-
-Debug configurations compile with Address- and UndefinedBehaviorSanitizer enabled — handy for catching the out-of-bounds/hardware-register-class bugs emulators love to attract:
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ```
 
+This enables sanitizer instrumentation useful for emulator debugging.
+
+## Usage
+
+Run the demo program:
+
+```sh
+./build/lr35902-emu
+```
+
+Run a ROM file:
+
+```sh
+./build/lr35902-emu /path/to/game.gb
+```
+
+Show usage/help:
+
+```sh
+./build/lr35902-emu --help
+```
+
 ## Project layout
 
-```
+```text
+├── CMakeLists.txt
+├── LICENSE
+├── README.md
 ├── include/
-│   └── LR35902.h   # CPU state model (registers, PC/SP, memory bus)
+│   └── LR35902.h        # CPU state model, flags, public API
 ├── src/
-│   └── Memory.cpp  # Memory bus: read routing, WRAM echo, ROM write guard
-└── CMakeLists.txt
+│   ├── LR35902.cpp      # Instruction decoder, arithmetic, flags, CB ops
+│   ├── Memory.cpp       # Memory routing and access rules
+│   ├── Timer.cpp        # Divider/timer register updates
+│   └── main.cpp         # CLI entry point and demo runner
+├── tests/
+│   └── cpu_tests.cpp    # Regression tests for CPU behavior
+└── build/                # Generated CMake build output
 ```
 
 ## References
