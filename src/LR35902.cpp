@@ -690,18 +690,26 @@ int execute_instruction(CPU_LR35902 &cpu)
     case 0x27: // DAA
     {
         uint8_t value = cpu.af.reg8.high;
-        if (get_flag(cpu, FLAG_C) || (!get_flag(cpu, FLAG_N) && (value & 0x0F) > 0x09))
+        const bool subtract = get_flag(cpu, FLAG_N);
+        bool carry = get_flag(cpu, FLAG_C);
+        uint8_t correction = 0;
+
+        if (get_flag(cpu, FLAG_H) || (!subtract && (value & 0x0F) > 0x09))
         {
-            value += 0x06;
-            set_c_flag(cpu, true);
+            correction |= 0x06;
         }
-        if (get_flag(cpu, FLAG_H) && !get_flag(cpu, FLAG_N))
+        if (carry || (!subtract && value > 0x99))
         {
-            value += 0x06;
+            correction |= 0x60;
+            carry = true;
         }
+
+        value = subtract ? static_cast<uint8_t>(value - correction)
+                         : static_cast<uint8_t>(value + correction);
         cpu.af.reg8.high = value;
-        set_z_flag(cpu, (cpu.af.reg8.high == 0));
+        set_z_flag(cpu, value == 0);
         set_h_flag(cpu, false);
+        set_c_flag(cpu, carry);
         cycles = 4;
         break;
     }

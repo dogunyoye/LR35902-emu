@@ -144,6 +144,31 @@ static void test_flag_behavior_add_sub()
     assert(get_flag(cpu, FLAG_C) == false);
 }
 
+static void test_decimal_adjust()
+{
+    CPU_LR35902 addition_cpu{};
+    addition_cpu.af.reg8.high = 0x9A;
+    addition_cpu.memory[0] = 0x27; // DAA after 0x99 + 0x01
+    assert(execute_instruction(addition_cpu) == 4);
+    assert(addition_cpu.af.reg8.high == 0x00);
+    assert(get_flag(addition_cpu, FLAG_Z));
+    assert(!get_flag(addition_cpu, FLAG_N));
+    assert(!get_flag(addition_cpu, FLAG_H));
+    assert(get_flag(addition_cpu, FLAG_C));
+
+    CPU_LR35902 subtraction_cpu{};
+    subtraction_cpu.af.reg8.high = 0x0F;
+    set_flag(subtraction_cpu, FLAG_N, true);
+    set_flag(subtraction_cpu, FLAG_H, true);
+    subtraction_cpu.memory[0] = 0x27; // DAA after 0x15 - 0x06
+    assert(execute_instruction(subtraction_cpu) == 4);
+    assert(subtraction_cpu.af.reg8.high == 0x09);
+    assert(!get_flag(subtraction_cpu, FLAG_Z));
+    assert(get_flag(subtraction_cpu, FLAG_N));
+    assert(!get_flag(subtraction_cpu, FLAG_H));
+    assert(!get_flag(subtraction_cpu, FLAG_C));
+}
+
 static void test_cb_prefixed_bit_and_rotate()
 {
     CPU_LR35902 cpu{};
@@ -492,6 +517,7 @@ int main()
     test_inc_dec_registers();
     test_add_hl_registers();
     test_flag_behavior_add_sub();
+    test_decimal_adjust();
     test_cb_prefixed_bit_and_rotate();
     test_instruction_cycle_counts();
     test_control_flow_cycle_counts();
