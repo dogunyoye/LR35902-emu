@@ -32,8 +32,10 @@ target_include_directories(cpu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
 target_link_libraries(cpu_tests PRIVATE lr35902 lr35902_warnings)
 add_test(NAME cpu_tests COMMAND cpu_tests)
 
+find_package(SDL2 REQUIRED)
+
 # Placeholder executable target — add main.cpp under src/ to enable.
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
     add_executable(lr35902-emu src/main.cpp)
-    target_link_libraries(lr35902-emu PRIVATE lr35902)
+    target_link_libraries(lr35902-emu PRIVATE lr35902 SDL2::SDL2)
 endif()
