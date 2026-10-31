@@ -125,7 +125,6 @@ namespace
         set_n_flag(cpu, false);
         set_h_flag(cpu, (((a & 0x0F) + (b & 0x0F) + (carry_in ? 1u : 0u)) > 0x0F));
         set_c_flag(cpu, (total > 0xFF));
-        cpu.af.reg8.high = result;
     }
 
     void apply_adc_flags(CPU_LR35902 &cpu, uint8_t a, uint8_t b)
@@ -142,13 +141,11 @@ namespace
 
     void apply_sub_flags(CPU_LR35902 &cpu, uint8_t a, uint8_t b, bool carry_in, uint8_t result)
     {
-        uint16_t total = static_cast<uint16_t>(a) - static_cast<uint16_t>(b) - (carry_in ? 1u : 0u);
         cpu.af.reg8.low = 0;
         set_z_flag(cpu, (result == 0));
         set_n_flag(cpu, true);
         set_h_flag(cpu, (((a & 0x0F) - (b & 0x0F) - (carry_in ? 1u : 0u)) & 0x10) == 0x10);
         set_c_flag(cpu, ((static_cast<int>(a) - static_cast<int>(b) - (carry_in ? 1 : 0)) < 0));
-        cpu.af.reg8.high = result;
     }
 
     void apply_logic_flags(CPU_LR35902 &cpu, uint8_t result, bool is_zero, bool set_n = false)
@@ -161,22 +158,44 @@ namespace
         cpu.af.reg8.high = result;
     }
 
-    void apply_inc_flags(CPU_LR35902 &cpu, uint8_t old_value, uint8_t new_value)
+    void apply_inc_flags(CPU_LR35902 &cpu, uint8_t old_value, uint8_t new_value, bool update_accumulator = false)
     {
         cpu.af.reg8.low = 0;
         set_z_flag(cpu, (new_value == 0));
         set_n_flag(cpu, false);
         set_h_flag(cpu, (((old_value & 0x0F) + 1) > 0x0F));
-        cpu.af.reg8.high = new_value;
+        if (update_accumulator)
+        {
+            cpu.af.reg8.high = new_value;
+        }
     }
 
-    void apply_dec_flags(CPU_LR35902 &cpu, uint8_t old_value, uint8_t new_value)
+    void apply_dec_flags(CPU_LR35902 &cpu, uint8_t old_value, uint8_t new_value, bool update_accumulator = false)
     {
         cpu.af.reg8.low = 0;
         set_z_flag(cpu, (new_value == 0));
         set_n_flag(cpu, true);
         set_h_flag(cpu, ((old_value & 0x0F) < 1));
-        cpu.af.reg8.high = new_value;
+        if (update_accumulator)
+        {
+            cpu.af.reg8.high = new_value;
+        }
+    }
+
+    void increment_register(CPU_LR35902 &cpu, uint8_t reg)
+    {
+        uint8_t old_value = read_reg8(cpu, reg);
+        uint8_t new_value = static_cast<uint8_t>(old_value + 1);
+        write_reg8(cpu, reg, new_value);
+        apply_inc_flags(cpu, old_value, new_value, reg == 7);
+    }
+
+    void decrement_register(CPU_LR35902 &cpu, uint8_t reg)
+    {
+        uint8_t old_value = read_reg8(cpu, reg);
+        uint8_t new_value = static_cast<uint8_t>(old_value - 1);
+        write_reg8(cpu, reg, new_value);
+        apply_dec_flags(cpu, old_value, new_value, reg == 7);
     }
 
     void handle_cb_instruction(CPU_LR35902 &cpu, uint8_t cb_opcode)
@@ -222,10 +241,6 @@ namespace
             set_n_flag(cpu, false);
             set_h_flag(cpu, false);
             set_c_flag(cpu, carry);
-            if (!is_memory)
-                cpu.af.reg8.high = result;
-            else
-                cpu.af.reg8.high = result;
             break;
         }
         case 0x08:
@@ -240,10 +255,6 @@ namespace
             set_n_flag(cpu, false);
             set_h_flag(cpu, false);
             set_c_flag(cpu, carry);
-            if (!is_memory)
-                cpu.af.reg8.high = result;
-            else
-                cpu.af.reg8.high = result;
             break;
         }
         case 0x10:
@@ -258,7 +269,6 @@ namespace
             set_n_flag(cpu, false);
             set_h_flag(cpu, false);
             set_c_flag(cpu, carry);
-            cpu.af.reg8.high = result;
             break;
         }
         case 0x18:
@@ -273,7 +283,6 @@ namespace
             set_n_flag(cpu, false);
             set_h_flag(cpu, false);
             set_c_flag(cpu, carry);
-            cpu.af.reg8.high = result;
             break;
         }
         case 0x20:
@@ -288,7 +297,6 @@ namespace
             set_n_flag(cpu, false);
             set_h_flag(cpu, false);
             set_c_flag(cpu, carry);
-            cpu.af.reg8.high = result;
             break;
         }
         case 0x28:
@@ -303,7 +311,6 @@ namespace
             set_n_flag(cpu, false);
             set_h_flag(cpu, false);
             set_c_flag(cpu, carry);
-            cpu.af.reg8.high = result;
             break;
         }
         case 0x30:
@@ -317,7 +324,6 @@ namespace
             set_n_flag(cpu, false);
             set_h_flag(cpu, false);
             set_c_flag(cpu, false);
-            cpu.af.reg8.high = result;
             break;
         }
         case 0x38:
@@ -332,7 +338,6 @@ namespace
             set_n_flag(cpu, false);
             set_h_flag(cpu, false);
             set_c_flag(cpu, carry);
-            cpu.af.reg8.high = result;
             break;
         }
         default:
@@ -425,6 +430,36 @@ int execute_instruction(CPU_LR35902 &cpu)
         cycles = 12;
         break;
 
+    case 0x03: // INC BC
+        cpu.bc.reg16 += 1;
+        cycles = 8;
+        break;
+
+    case 0x04: // INC B
+        increment_register(cpu, 0);
+        cycles = 4;
+        break;
+
+    case 0x05: // DEC B
+        decrement_register(cpu, 0);
+        cycles = 4;
+        break;
+
+    case 0x07: // RLCA
+    {
+        uint8_t value = cpu.af.reg8.high;
+        bool carry = (value & 0x80) != 0;
+        value = static_cast<uint8_t>((value << 1) | (carry ? 1u : 0u));
+        cpu.af.reg8.high = value;
+        cpu.af.reg8.low = 0;
+        set_c_flag(cpu, carry);
+        set_z_flag(cpu, false);
+        set_n_flag(cpu, false);
+        set_h_flag(cpu, false);
+        cycles = 4;
+        break;
+    }
+
     case 0x02: // LD (BC), A
         cpu_write(cpu, cpu.bc.reg16, cpu.af.reg8.high);
         cycles = 8;
@@ -450,15 +485,50 @@ int execute_instruction(CPU_LR35902 &cpu)
         cycles = 8;
         break;
 
+    case 0x0B: // DEC BC
+        cpu.bc.reg16 -= 1;
+        cycles = 8;
+        break;
+
+    case 0x0C: // INC C
+        increment_register(cpu, 1);
+        cycles = 4;
+        break;
+
+    case 0x0D: // DEC C
+        decrement_register(cpu, 1);
+        cycles = 4;
+        break;
+
     case 0x0E: // LD C, d8
         cpu.bc.reg8.low = cpu_read(cpu, cpu.pc++);
         cycles = 8;
         break;
 
+    case 0x0F: // RRCA
+    {
+        uint8_t value = cpu.af.reg8.high;
+        bool carry = (value & 0x01) != 0;
+        value = static_cast<uint8_t>((value >> 1) | (carry ? 0x80u : 0u));
+        cpu.af.reg8.high = value;
+        cpu.af.reg8.low = 0;
+        set_c_flag(cpu, carry);
+        set_z_flag(cpu, false);
+        set_n_flag(cpu, false);
+        set_h_flag(cpu, false);
+        cycles = 4;
+        break;
+    }
+
     case 0x11: // LD DE, d16
         cpu.de.reg16 = cpu_read16(cpu, cpu.pc);
         cpu.pc += 2;
         cycles = 12;
+        break;
+
+    case 0x13: // INC DE
+        cpu.de.reg16 += 1;
+        cycles = 8;
         break;
 
     case 0x12: // LD (DE), A
@@ -471,10 +541,70 @@ int execute_instruction(CPU_LR35902 &cpu)
         cycles = 8;
         break;
 
+    case 0x14: // INC D
+        increment_register(cpu, 2);
+        cycles = 4;
+        break;
+
+    case 0x15: // DEC D
+        decrement_register(cpu, 2);
+        cycles = 4;
+        break;
+
+    case 0x17: // RLA
+    {
+        uint8_t value = cpu.af.reg8.high;
+        bool carry = (value & 0x80) != 0;
+        value = static_cast<uint8_t>((value << 1) | (get_flag(cpu, FLAG_C) ? 1u : 0u));
+        cpu.af.reg8.high = value;
+        cpu.af.reg8.low = 0;
+        set_c_flag(cpu, carry);
+        set_z_flag(cpu, false);
+        set_n_flag(cpu, false);
+        set_h_flag(cpu, false);
+        cycles = 4;
+        break;
+    }
+
+    case 0x19: // ADD HL, DE
+        cpu.hl.reg16 = static_cast<uint16_t>(cpu.hl.reg16 + cpu.de.reg16);
+        cycles = 8;
+        break;
+
     case 0x1A: // LD A, (DE)
         cpu.af.reg8.high = cpu_read(cpu, cpu.de.reg16);
         cycles = 8;
         break;
+
+    case 0x1B: // DEC DE
+        cpu.de.reg16 -= 1;
+        cycles = 8;
+        break;
+
+    case 0x1C: // INC E
+        increment_register(cpu, 3);
+        cycles = 4;
+        break;
+
+    case 0x1D: // DEC E
+        decrement_register(cpu, 3);
+        cycles = 4;
+        break;
+
+    case 0x1F: // RRA
+    {
+        uint8_t value = cpu.af.reg8.high;
+        bool carry = (value & 0x01) != 0;
+        value = static_cast<uint8_t>((value >> 1) | (get_flag(cpu, FLAG_C) ? 0x80u : 0u));
+        cpu.af.reg8.high = value;
+        cpu.af.reg8.low = 0;
+        set_c_flag(cpu, carry);
+        set_z_flag(cpu, false);
+        set_n_flag(cpu, false);
+        set_h_flag(cpu, false);
+        cycles = 4;
+        break;
+    }
 
     case 0x1E: // LD E, d8
         cpu.de.reg8.low = cpu_read(cpu, cpu.pc++);
@@ -501,10 +631,25 @@ int execute_instruction(CPU_LR35902 &cpu)
         cycles = 12;
         break;
 
+    case 0x23: // INC HL
+        cpu.hl.reg16 += 1;
+        cycles = 8;
+        break;
+
     case 0x22: // LD (HL+), A
         cpu_write(cpu, cpu.hl.reg16, cpu.af.reg8.high);
         cpu.hl.reg16 += 1;
         cycles = 8;
+        break;
+
+    case 0x24: // INC H
+        increment_register(cpu, 4);
+        cycles = 4;
+        break;
+
+    case 0x25: // DEC H
+        decrement_register(cpu, 4);
+        cycles = 4;
         break;
 
     case 0x26: // LD H, d8
@@ -512,10 +657,49 @@ int execute_instruction(CPU_LR35902 &cpu)
         cycles = 8;
         break;
 
+    case 0x27: // DAA
+    {
+        uint8_t value = cpu.af.reg8.high;
+        if (get_flag(cpu, FLAG_C) || (!get_flag(cpu, FLAG_N) && (value & 0x0F) > 0x09))
+        {
+            value += 0x06;
+            set_c_flag(cpu, true);
+        }
+        if (get_flag(cpu, FLAG_H) && !get_flag(cpu, FLAG_N))
+        {
+            value += 0x06;
+        }
+        cpu.af.reg8.high = value;
+        set_z_flag(cpu, (cpu.af.reg8.high == 0));
+        set_h_flag(cpu, false);
+        cycles = 4;
+        break;
+    }
+
+    case 0x29: // ADD HL, HL
+        cpu.hl.reg16 = static_cast<uint16_t>(cpu.hl.reg16 + cpu.hl.reg16);
+        cycles = 8;
+        break;
+
     case 0x2A: // LD A, (HL+)
         cpu.af.reg8.high = cpu_read(cpu, cpu.hl.reg16);
         cpu.hl.reg16 += 1;
         cycles = 8;
+        break;
+
+    case 0x2B: // DEC HL
+        cpu.hl.reg16 -= 1;
+        cycles = 8;
+        break;
+
+    case 0x2C: // INC L
+        increment_register(cpu, 5);
+        cycles = 4;
+        break;
+
+    case 0x2D: // DEC L
+        decrement_register(cpu, 5);
+        cycles = 4;
         break;
 
     case 0x2E: // LD L, d8
@@ -535,10 +719,57 @@ int execute_instruction(CPU_LR35902 &cpu)
         cycles = 8;
         break;
 
+    case 0x33: // INC SP
+        cpu.sp += 1;
+        cycles = 8;
+        break;
+
+    case 0x34: // INC (HL)
+    {
+        uint8_t old_value = cpu_read(cpu, cpu.hl.reg16);
+        uint8_t value = static_cast<uint8_t>(old_value + 1);
+        cpu_write(cpu, cpu.hl.reg16, value);
+        apply_inc_flags(cpu, old_value, value, false);
+        cycles = 12;
+        break;
+    }
+
+    case 0x35: // DEC (HL)
+    {
+        uint8_t old_value = cpu_read(cpu, cpu.hl.reg16);
+        uint8_t value = static_cast<uint8_t>(old_value - 1);
+        cpu_write(cpu, cpu.hl.reg16, value);
+        apply_dec_flags(cpu, old_value, value, false);
+        cycles = 12;
+        break;
+    }
+
+    case 0x37: // SCF
+        set_flag(cpu, FLAG_N, false);
+        set_flag(cpu, FLAG_H, false);
+        set_flag(cpu, FLAG_C, true);
+        cycles = 4;
+        break;
+
     case 0x3A: // LD A, (HL-)
         cpu.af.reg8.high = cpu_read(cpu, cpu.hl.reg16);
         cpu.hl.reg16 -= 1;
         cycles = 8;
+        break;
+
+    case 0x3B: // DEC SP
+        cpu.sp -= 1;
+        cycles = 8;
+        break;
+
+    case 0x3C: // INC A
+        increment_register(cpu, 7);
+        cycles = 4;
+        break;
+
+    case 0x3D: // DEC A
+        decrement_register(cpu, 7);
+        cycles = 4;
         break;
 
     case 0x3E: // LD A, d8
@@ -546,16 +777,16 @@ int execute_instruction(CPU_LR35902 &cpu)
         cycles = 8;
         break;
 
+    case 0x2F: // CPL
+        cpu.af.reg8.high = static_cast<uint8_t>(~cpu.af.reg8.high);
+        set_n_flag(cpu, true);
+        set_h_flag(cpu, true);
+        cycles = 4;
+        break;
+
     case 0x36: // LD (HL), d8
         cpu_write(cpu, cpu.hl.reg16, cpu_read(cpu, cpu.pc++));
         cycles = 12;
-        break;
-
-    case 0x37: // SCF
-        set_flag(cpu, FLAG_N, false);
-        set_flag(cpu, FLAG_H, false);
-        set_flag(cpu, FLAG_C, true);
-        cycles = 4;
         break;
 
     case 0x3F: // CCF
@@ -691,6 +922,7 @@ int execute_instruction(CPU_LR35902 &cpu)
         uint8_t a = cpu.af.reg8.high;
         uint8_t result = static_cast<uint8_t>(a - operand);
         apply_sub_flags(cpu, a, operand, false, result);
+        cpu.af.reg8.high = result;
         cycles = 4;
         break;
     }
@@ -708,6 +940,7 @@ int execute_instruction(CPU_LR35902 &cpu)
         uint8_t a = cpu.af.reg8.high;
         uint8_t result = static_cast<uint8_t>(a - operand - (get_flag(cpu, FLAG_C) ? 1u : 0u));
         apply_sub_flags(cpu, a, operand, get_flag(cpu, FLAG_C), result);
+        cpu.af.reg8.high = result;
         cycles = 4;
         break;
     }
@@ -836,14 +1069,12 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
 
     case 0xCB: // Prefix CB
-        cpu.pc--;
-        {
-            uint8_t cb_opcode = cpu_read(cpu, ++cpu.pc);
-            cpu.pc += 1;
-            handle_cb_instruction(cpu, cb_opcode);
-            cycles = 8;
-        }
+    {
+        uint8_t cb_opcode = cpu_read(cpu, cpu.pc++);
+        handle_cb_instruction(cpu, cb_opcode);
+        cycles = 8;
         break;
+    }
 
     case 0xCD: // CALL a16
     {
@@ -878,6 +1109,7 @@ int execute_instruction(CPU_LR35902 &cpu)
         uint8_t immediate = cpu_read(cpu, cpu.pc++);
         uint8_t result = static_cast<uint8_t>(cpu.af.reg8.high - immediate);
         apply_sub_flags(cpu, cpu.af.reg8.high, immediate, false, result);
+        cpu.af.reg8.high = result;
         cycles = 8;
         break;
     }

@@ -60,9 +60,30 @@ static void test_stack_and_loads()
     assert(cpu.memory[0xFFFF] == 0x12);
 }
 
+static void test_inc_dec_registers()
+{
+    CPU_LR35902 cpu{};
+    cpu.memory[0x0000] = 0x04; // INC B
+    cpu.memory[0x0001] = 0x05; // DEC B
+    cpu.memory[0x0002] = 0x00; // NOP
+    cpu.pc = 0x0000;
+
+    execute_instruction(cpu);
+    assert(cpu.bc.reg8.high == 0x01);
+    assert(cpu.pc == 0x0001);
+
+    execute_instruction(cpu);
+    assert(cpu.bc.reg8.high == 0x00);
+    assert(cpu.pc == 0x0002);
+
+    execute_instruction(cpu);
+    assert(cpu.pc == 0x0003);
+}
+
 int main()
 {
     test_load_and_add();
     test_stack_and_loads();
+    test_inc_dec_registers();
     return 0;
 }
