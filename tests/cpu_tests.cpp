@@ -124,6 +124,62 @@ static void test_timer_registers()
     assert(cpu.memory[0xFF0F] == 0x04);
 }
 
+static void test_flag_behavior_add_sub()
+{
+    CPU_LR35902 cpu{};
+    cpu.memory[0x0000] = 0x3E; // LD A, d8
+    cpu.memory[0x0001] = 0x0F;
+    cpu.memory[0x0002] = 0x06; // LD B, d8
+    cpu.memory[0x0003] = 0x01;
+    cpu.memory[0x0004] = 0x80; // ADD A, B
+    cpu.memory[0x0005] = 0xD6; // SUB A, d8
+    cpu.memory[0x0006] = 0x01;
+    cpu.pc = 0x0000;
+
+    execute_instruction(cpu); // LD A, 0x0F
+    assert(cpu.af.reg8.high == 0x0F);
+
+    execute_instruction(cpu); // LD B, 0x01
+    assert(cpu.bc.reg8.high == 0x01);
+
+    execute_instruction(cpu); // ADD A, B => 0x10
+    assert(cpu.af.reg8.high == 0x10);
+    assert(get_flag(cpu, FLAG_Z) == false);
+    assert(get_flag(cpu, FLAG_N) == false);
+    assert(get_flag(cpu, FLAG_H) == true);
+    assert(get_flag(cpu, FLAG_C) == false);
+
+    execute_instruction(cpu); // SUB A, 0x01 => 0x0F
+    assert(cpu.af.reg8.high == 0x0F);
+    assert(get_flag(cpu, FLAG_Z) == false);
+    assert(get_flag(cpu, FLAG_N) == true);
+    assert(get_flag(cpu, FLAG_H) == true);
+    assert(get_flag(cpu, FLAG_C) == false);
+}
+
+static void test_cb_prefixed_bit_and_rotate()
+{
+    CPU_LR35902 cpu{};
+    cpu.bc.reg8.high = 0x80; // B = 0x80
+    cpu.af.reg8.high = 0x80; // A = 0x80
+    cpu.memory[0x0000] = 0xCB;
+    cpu.memory[0x0001] = 0x00; // RLC B
+    cpu.memory[0x0002] = 0xCB;
+    cpu.memory[0x0003] = 0x7F; // BIT 7, A
+    cpu.pc = 0x0000;
+
+    execute_instruction(cpu);
+    assert(cpu.bc.reg8.high == 0x01);
+    assert(get_flag(cpu, FLAG_C) == true);
+    assert(get_flag(cpu, FLAG_Z) == false);
+
+    execute_instruction(cpu);
+    assert(get_flag(cpu, FLAG_Z) == false);
+    assert(get_flag(cpu, FLAG_N) == false);
+    assert(get_flag(cpu, FLAG_H) == true);
+    assert(get_flag(cpu, FLAG_C) == true);
+}
+
 int main()
 {
     test_load_and_add();
@@ -131,5 +187,7 @@ int main()
     test_inc_dec_registers();
     test_add_hl_registers();
     test_timer_registers();
+    test_flag_behavior_add_sub();
+    test_cb_prefixed_bit_and_rotate();
     return 0;
 }

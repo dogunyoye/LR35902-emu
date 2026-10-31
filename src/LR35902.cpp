@@ -351,11 +351,12 @@ namespace
             bool is_memory = false;
             uint8_t value = read_cb_operand(is_memory);
             uint8_t bitmask = static_cast<uint8_t>(1u << bit_index);
+            const bool carry = get_flag(cpu, FLAG_C);
             cpu.af.reg8.low = 0;
             set_z_flag(cpu, ((value & bitmask) == 0));
             set_n_flag(cpu, false);
             set_h_flag(cpu, true);
-            set_c_flag(cpu, get_flag(cpu, FLAG_C));
+            set_c_flag(cpu, carry);
             cpu.af.reg8.high = value;
             return;
         }
