@@ -17,12 +17,14 @@ const uint16_t IE_REG = 0xFFFF; // Interrupt Enable Register
 
 uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
 {
-    // MBC / cartridge ROM routing: handle RAM enable bits and ROM banking states.
-    // This keeps the CPU bus model explicit while remaining compatible with the
-    // simple flat-memory implementation currently used in the emulator.
     if (address >= ECHO_START && address <= ECHO_END)
     {
         address -= 0x2000;
+    }
+
+    if (address < 0x8000 && !cpu.cartridge_rom.empty())
+    {
+        return cpu.cartridge_rom[address];
     }
 
     if (address >= VRAM_START && address <= VRAM_END && cpu.vram_locked)
@@ -40,11 +42,13 @@ uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
 
 void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
 {
-    // Cartridge ROM writes: lower 0x2000 region is used for RAM enable and
-    // simple MBC banking triggers. A real MBC implementation would decode these
-    // values; for the current emulator, we model the enable bit explicitly.
     if (address < 0x8000)
     {
+        if (!cpu.cartridge_rom.empty())
+        {
+            return;
+        }
+
         if ((address & 0x1FFF) == 0x0000)
         {
             cpu.cart_ram_enabled = (value & 0x0F) == 0x0A;

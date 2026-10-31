@@ -1,6 +1,8 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 union RegPair
 {
@@ -29,6 +31,7 @@ struct CPU_LR35902
     bool cart_ram_enabled = false;
     bool vram_locked = false;
     bool oam_locked = false;
+    std::vector<uint8_t> cartridge_rom;
 
     // 64KB Flat Address Space (will be replaced later with custom read/write routers)
     std::array<uint8_t, 65536> memory;
@@ -59,7 +62,10 @@ inline bool get_flag(const CPU_LR35902 &cpu, uint8_t flag)
 }
 
 int execute_instruction(CPU_LR35902 &cpu);
+uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address);
+void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value);
 uint16_t cpu_read16(CPU_LR35902 &cpu, uint16_t address);
 void cpu_push16(CPU_LR35902 &cpu, uint16_t val);
 uint16_t cpu_pop16(CPU_LR35902 &cpu);
 void update_timers(CPU_LR35902 &cpu, int cycles);
+bool load_rom_only_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error);

@@ -6,7 +6,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -156,24 +158,17 @@ namespace
         }
     }
 
-    bool load_rom(CPU_LR35902 &cpu, const std::filesystem::path &path)
+    bool load_rom(CPU_LR35902 &cpu, const std::filesystem::path &path, std::string &error)
     {
         std::ifstream file(path, std::ios::binary);
         if (!file)
         {
+            error = "could not open file.";
             return false;
         }
 
         std::vector<uint8_t> rom((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        if (rom.empty())
-        {
-            return false;
-        }
-
-        std::fill(cpu.memory.begin(), cpu.memory.begin() + static_cast<long long>(rom.size()), 0);
-        std::copy(rom.begin(), rom.end(), cpu.memory.begin());
-        cpu.pc = 0x0100;
-        return true;
+        return load_rom_only_cartridge(cpu, std::move(rom), error);
     }
 }
 
@@ -200,15 +195,17 @@ int main(int argc, char **argv)
     if (argc == 2)
     {
         const std::filesystem::path rom_path(argv[1]);
-        if (!load_rom(cpu, rom_path))
+        std::string rom_error;
+        if (!load_rom(cpu, rom_path, rom_error))
         {
-            std::cerr << "Unable to load ROM: " << rom_path << "\n\n";
+            std::cerr << "Unable to load ROM: " << rom_path << " (" << rom_error << ")\n\n";
             print_usage(argv[0]);
             return 1;
         }
     }
     else
     {
+        initialize_demo_vram(cpu);
         load_demo_program(cpu);
         std::cout << "LR35902 emulator\n";
         std::cout << "Executing a short demo program.\n\n";
@@ -219,8 +216,6 @@ int main(int argc, char **argv)
         std::cout << "LR35902 emulator\n";
         std::cout << "Loading ROM: " << argv[1] << "\n\n";
     }
-
-    initialize_demo_vram(cpu);
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) < 0)
     {
@@ -275,7 +270,6 @@ int main(int argc, char **argv)
 
     std::vector<uint32_t> framebuffer(static_cast<std::size_t>(GB_WIDTH) * GB_HEIGHT, 0);
     bool running = true;
-    uint32_t frame_index = 0;
 
     while (running)
     {

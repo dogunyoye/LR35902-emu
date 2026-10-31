@@ -11,12 +11,12 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | CPU register model (AF/BC/DE/HL, SP, PC, IME) | :white_check_mark: done |
 | 64 KB flat memory space + read/write routing | :white_check_mark: done |
 | WRAM echo (0xE000–0xFDFF) | :white_check_mark: done |
-| ROM write protection / cartridge RAM enable | :white_check_mark: done |
+| ROM-only cartridge (32 KiB, header validated, write protected) | :white_check_mark: done |
 | VRAM/OAM access locking during PPU modes | :white_check_mark: done |
 | Core instruction decode (loads, arithmetic, jumps, stack, CB-prefixed opcodes) | :white_check_mark: partial |
 | Timer registers (DIV/TIMA/TMA/TAC) and update logic | :white_check_mark: done |
 | Regression tests for core CPU/timer behavior | :white_check_mark: done |
-| CLI runner with demo mode and ROM loading | :white_check_mark: done |
+| CLI runner with demo mode and ROM-only loading | :white_check_mark: done |
 | Full LR35902 instruction coverage | :soon: planned |
 | MBC emulation / cartridge banking | :soon: planned |
 | Full PPU and hardware fidelity | :soon: planned |
@@ -53,7 +53,7 @@ Run the demo program:
 ./build/lr35902-emu
 ```
 
-Run a ROM file:
+Run a 32 KiB ROM-only cartridge image (header type 0x00, ROM size code 0x00):
 
 ```sh
 ./build/lr35902-emu /path/to/game.gb
@@ -76,11 +76,12 @@ Show usage/help:
 ├── src/
 │   ├── LR35902.cpp      # Instruction decoder, arithmetic, flags, CB ops
 │   ├── Memory.cpp       # Memory routing and access rules
+│   ├── Cartridge.cpp    # ROM-only cartridge validation and setup
 │   ├── Timer.cpp        # Divider/timer register updates
 │   └── main.cpp         # CLI entry point and demo runner
 ├── tests/
-│   └── cpu_tests.cpp    # Regression tests for CPU behavior
-└── build/                # Generated CMake build output
+│   └── cpu_tests.cpp    # Regression tests for CPU and cartridge behavior
+└── build/               # Generated CMake build output
 ```
 
 ## References
