@@ -27,10 +27,16 @@ target_include_directories(lr35902 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(lr35902 PRIVATE lr35902_warnings)
 
 enable_testing()
-add_executable(cpu_tests tests/cpu_tests.cpp)
-target_include_directories(cpu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(cpu_tests PRIVATE lr35902 lr35902_warnings)
-add_test(NAME cpu_tests COMMAND cpu_tests)
+function(add_emulator_test target source_file)
+    add_executable(${target} ${source_file})
+    target_link_libraries(${target} PRIVATE lr35902 lr35902_warnings)
+    add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
+add_emulator_test(cpu_tests tests/cpu_tests.cpp)
+add_emulator_test(timer_tests tests/timer_tests.cpp)
+add_emulator_test(cartridge_tests tests/cartridge_tests.cpp)
+add_emulator_test(ppu_tests tests/ppu_tests.cpp)
 
 find_package(SDL2 REQUIRED)
 
