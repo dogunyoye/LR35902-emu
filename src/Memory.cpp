@@ -42,6 +42,13 @@ uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
 
 void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
 {
+    if (address == 0xFF04)
+    {
+        cpu.memory[address] = 0;
+        cpu.div_cycle_accumulator = 0;
+        return;
+    }
+
     if (address < 0x8000)
     {
         if (!cpu.cartridge_rom.empty())

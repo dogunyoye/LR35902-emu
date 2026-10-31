@@ -15,8 +15,25 @@ static void test_timer_registers()
     assert(cpu.memory[0xFF0F] == 0x04);
 }
 
+static void test_div_write_resets_divider_phase()
+{
+    CPU_LR35902 cpu{};
+    update_timers(cpu, 255);
+    assert(cpu.memory[0xFF04] == 0);
+
+    cpu_write(cpu, 0xFF04, 0xAB);
+    assert(cpu.memory[0xFF04] == 0);
+    assert(cpu.div_cycle_accumulator == 0);
+
+    update_timers(cpu, 255);
+    assert(cpu.memory[0xFF04] == 0);
+    update_timers(cpu, 1);
+    assert(cpu.memory[0xFF04] == 1);
+}
+
 int main()
 {
     test_timer_registers();
+    test_div_write_resets_divider_phase();
     return 0;
 }
