@@ -21,7 +21,7 @@ elseif(MSVC)
 endif()
 
 # Emulator core library (static for simple linking into future exe/tests)
-add_library(lr35902 STATIC src/Memory.cpp src/LR35902.cpp)
+add_library(lr35902 STATIC src/Memory.cpp src/LR35902.cpp src/Timer.cpp)
 target_compile_features(lr35902 PUBLIC cxx_std_20)
 target_include_directories(lr35902 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(lr35902 PRIVATE lr35902_warnings)

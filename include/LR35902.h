@@ -62,3 +62,4 @@ int execute_instruction(CPU_LR35902 &cpu);
 uint16_t cpu_read16(CPU_LR35902 &cpu, uint16_t address);
 void cpu_push16(CPU_LR35902 &cpu, uint16_t val);
 uint16_t cpu_pop16(CPU_LR35902 &cpu);
+void update_timers(CPU_LR35902 &cpu, int cycles);
