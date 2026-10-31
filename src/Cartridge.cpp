@@ -36,6 +36,8 @@ bool load_rom_only_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::st
     cpu.pc = 0x0100;
     cpu.memory[0xFF40] = 0x91;
     cpu.memory[0xFF47] = 0xFC;
+    cpu.memory[0xFF48] = 0xFF;
+    cpu.memory[0xFF49] = 0xFF;
     error.clear();
     return true;
 }

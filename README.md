@@ -17,7 +17,7 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | Timer registers (DIV/TIMA/TMA/TAC) and update logic | :white_check_mark: done |
 | Interrupt dispatch, priority, delayed EI, and HALT wake-up | :white_check_mark: done |
 | Cycle-driven CPU and timer stepping | :white_check_mark: done |
-| PPU mode timing, scanline background rendering, and VBlank request | :white_check_mark: done |
+| PPU mode timing, scanline BG/window/sprite rendering, and VBlank request | :white_check_mark: done |
 | Regression tests for CPU, timer, and interrupt behavior | :white_check_mark: done |
 | CLI runner with cycle-driven frames and ROM-only loading | :white_check_mark: done |
 | Cycle-exact CPU and peripheral conformance | :soon: planned |
@@ -80,7 +80,7 @@ Show usage/help:
 │   ├── LR35902.cpp      # Instruction decoder, flags, interrupt stepping
 │   ├── Memory.cpp       # Memory routing and access rules
 │   ├── Cartridge.cpp    # ROM-only cartridge validation and setup
-│   ├── PPU.cpp          # LCD modes, scanlines, and background rendering
+│   ├── PPU.cpp          # LCD modes, scanlines, and BG/window/sprite composition
 │   ├── Timer.cpp        # Divider/timer register updates
 │   └── main.cpp         # CLI entry point and demo runner
 ├── tests/
