@@ -39,6 +39,12 @@ This generates:
 - test executables: `build/cpu_tests`, `build/timer_tests`, `build/cartridge_tests`, `build/memory_tests`, and `build/ppu_tests`
 - the emulator CLI: `build/lr35902-emu`
 
+Run the test suite with:
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
 ### Debug builds
 
 ```sh
