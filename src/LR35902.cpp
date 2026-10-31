@@ -1,5 +1,6 @@
 #include "LR35902.h"
 #include <iostream>
+#include <stdexcept>
 
 // Helper declarations
 uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address);

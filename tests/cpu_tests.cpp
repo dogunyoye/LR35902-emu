@@ -1,7 +1,6 @@
 #include "LR35902.h"
 
 #include <cassert>
-#include <cstdint>
 
 static void test_load_and_add()
 {
