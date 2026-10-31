@@ -357,7 +357,6 @@ namespace
             set_n_flag(cpu, false);
             set_h_flag(cpu, true);
             set_c_flag(cpu, carry);
-            cpu.af.reg8.high = value;
             return;
         }
 
@@ -893,7 +892,7 @@ int execute_instruction(CPU_LR35902 &cpu)
             break;
         }
         write_reg8(cpu, dest, read_reg8(cpu, src));
-        cycles = 4;
+        cycles = (dest == 6 || src == 6) ? 8 : 4;
         break;
     }
 
@@ -1034,12 +1033,13 @@ int execute_instruction(CPU_LR35902 &cpu)
         if (!get_flag(cpu, FLAG_Z))
         {
             cpu.pc = cpu_read16(cpu, cpu.pc);
+            cycles = 16;
         }
         else
         {
             cpu.pc += 2;
+            cycles = 12;
         }
-        cycles = 16;
         break;
 
     case 0xC3: // JP a16
@@ -1086,17 +1086,24 @@ int execute_instruction(CPU_LR35902 &cpu)
 
     case 0xCA: // JP Z, a16
         if (get_flag(cpu, FLAG_Z))
+        {
             cpu.pc = cpu_read16(cpu, cpu.pc);
+            cycles = 16;
+        }
         else
+        {
             cpu.pc += 2;
-        cycles = 16;
+            cycles = 12;
+        }
         break;
 
     case 0xCB: // Prefix CB
     {
         uint8_t cb_opcode = cpu_read(cpu, cpu.pc++);
         handle_cb_instruction(cpu, cb_opcode);
-        cycles = 8;
+        const uint8_t operand = cb_opcode & 0x07;
+        const uint8_t group = cb_opcode >> 6;
+        cycles = operand == 6 ? (group == 1 ? 12 : 16) : 8;
         break;
     }
 

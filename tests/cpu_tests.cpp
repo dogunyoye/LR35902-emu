@@ -180,6 +180,60 @@ static void test_cb_prefixed_bit_and_rotate()
     assert(get_flag(cpu, FLAG_C) == true);
 }
 
+static void test_instruction_cycle_counts()
+{
+    CPU_LR35902 cpu{};
+    cpu.hl.reg16 = 0xC000;
+    cpu.af.reg8.high = 0x5A;
+    cpu.memory[0xC000] = 0x80;
+    cpu.memory[0x0000] = 0x46; // LD B, (HL)
+    cpu.memory[0x0001] = 0x70; // LD (HL), B
+    cpu.memory[0x0002] = 0x40; // LD B, B
+    cpu.memory[0x0003] = 0xCB;
+    cpu.memory[0x0004] = 0x00; // RLC B
+    cpu.memory[0x0005] = 0xCB;
+    cpu.memory[0x0006] = 0x46; // BIT 0, (HL)
+    cpu.memory[0x0007] = 0xCB;
+    cpu.memory[0x0008] = 0x06; // RLC (HL)
+
+    assert(execute_instruction(cpu) == 8);
+    assert(cpu.bc.reg8.high == 0x80);
+    assert(execute_instruction(cpu) == 8);
+    assert(cpu.memory[0xC000] == 0x80);
+    assert(execute_instruction(cpu) == 4);
+    assert(execute_instruction(cpu) == 8);
+    assert(get_flag(cpu, FLAG_C));
+    assert(cpu.af.reg8.high == 0x5A);
+    assert(execute_instruction(cpu) == 12);
+    assert(get_flag(cpu, FLAG_Z));
+    assert(execute_instruction(cpu) == 16);
+    assert(cpu.memory[0xC000] == 0x01);
+    assert(get_flag(cpu, FLAG_C));
+}
+
+static void test_control_flow_cycle_counts()
+{
+    CPU_LR35902 cpu{};
+    cpu.memory[0x0000] = 0xC2; // JP NZ, a16
+    cpu.memory[0x0001] = 0x06;
+    cpu.memory[0x0002] = 0x00;
+    cpu.memory[0x0006] = 0xCA; // JP Z, a16
+    cpu.memory[0x0007] = 0x09;
+    cpu.memory[0x0008] = 0x00;
+    cpu.memory[0x0009] = 0x76; // HALT
+
+    assert(execute_instruction(cpu) == 16);
+    assert(cpu.pc == 0x0006);
+
+    set_flag(cpu, FLAG_Z, false);
+    assert(execute_instruction(cpu) == 12);
+    assert(cpu.pc == 0x0009);
+
+    assert(execute_instruction(cpu) == 4);
+    assert(cpu.halted);
+    assert(cpu.pc == 0x000A);
+}
+
 int main()
 {
     test_load_and_add();
@@ -189,5 +243,7 @@ int main()
     test_timer_registers();
     test_flag_behavior_add_sub();
     test_cb_prefixed_bit_and_rotate();
+    test_instruction_cycle_counts();
+    test_control_flow_cycle_counts();
     return 0;
 }
