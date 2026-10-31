@@ -42,6 +42,7 @@ add_emulator_test(cpu_tests tests/cpu_tests.cpp)
 add_emulator_test(timer_tests tests/timer_tests.cpp)
 add_emulator_test(cartridge_tests tests/cartridge_tests.cpp)
 add_emulator_test(memory_tests tests/memory_tests.cpp)
+add_emulator_test(joypad_tests tests/joypad_tests.cpp)
 add_emulator_test(ppu_tests tests/ppu_tests.cpp)
 
 find_package(SDL2 REQUIRED)

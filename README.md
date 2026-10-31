@@ -16,9 +16,10 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | Legal base and CB-prefixed opcode implementations | :white_check_mark: done |
 | Timer registers (DIV/TIMA/TMA/TAC) and update logic | :white_check_mark: done |
 | Interrupt dispatch, priority, delayed EI, and HALT wake-up | :white_check_mark: done |
+| JOYP register, keyboard input, and joypad interrupt | :white_check_mark: done |
 | Cycle-driven CPU and timer stepping | :white_check_mark: done |
 | Approximate variable mode-3 timing, BG/window/sprite rendering, VBlank and STAT interrupts | :white_check_mark: done |
-| Regression tests for CPU, timer, interrupt, cartridge, memory, and PPU behavior | :white_check_mark: done |
+| Regression tests for CPU, timer, interrupt, joypad, cartridge, memory, and PPU behavior | :white_check_mark: done |
 | CLI runner with cycle-driven frames and ROM-only loading | :white_check_mark: done |
 | Cycle-exact CPU and peripheral conformance | :soon: planned |
 | MBC emulation / cartridge banking | :soon: planned |
@@ -36,7 +37,7 @@ cmake --build build
 This generates:
 
 - the static library: `build/liblr35902.a`
-- test executables: `build/cpu_tests`, `build/timer_tests`, `build/cartridge_tests`, `build/memory_tests`, and `build/ppu_tests`
+- test executables: `build/cpu_tests`, `build/timer_tests`, `build/cartridge_tests`, `build/memory_tests`, `build/joypad_tests`, and `build/ppu_tests`
 - the emulator CLI: `build/lr35902-emu`
 
 Run the test suite with:
@@ -68,6 +69,8 @@ Run a 32 KiB ROM-only cartridge image (header type 0x00, ROM size code 0x00):
 ./build/lr35902-emu /path/to/game.gb
 ```
 
+Controls: arrow keys move, Z is A, X is B, Right Shift is Select, and Enter is Start.
+
 Show usage/help:
 
 ```sh
@@ -94,6 +97,7 @@ Show usage/help:
 │   ├── timer_tests.cpp      # Timer register behavior
 │   ├── cartridge_tests.cpp  # ROM-only cartridge loading and mapping
 │   ├── memory_tests.cpp     # Memory-bus address behavior
+│   ├── joypad_tests.cpp     # JOYP selection and interrupt behavior
 │   └── ppu_tests.cpp        # PPU modes, scanlines, window, and sprites
 └── build/               # Generated CMake build output
 ```

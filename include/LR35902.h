@@ -30,6 +30,7 @@ struct CPU_LR35902
     uint8_t ime_enable_delay = 0;
     uint16_t div_cycle_accumulator = 0;
     uint16_t tima_cycle_accumulator = 0;
+    uint8_t joypad_buttons = 0xFF;
 
     // Memory routing state.
     bool cart_ram_enabled = false;
@@ -39,6 +40,18 @@ struct CPU_LR35902
 
     // 64KB Flat Address Space (will be replaced later with custom read/write routers)
     std::array<uint8_t, 65536> memory;
+};
+
+enum class JoypadButton : uint8_t
+{
+    Right = 0,
+    Left,
+    Up,
+    Down,
+    A,
+    B,
+    Select,
+    Start
 };
 
 // Flag Bit Masks
@@ -69,6 +82,7 @@ int execute_instruction(CPU_LR35902 &cpu);
 int step_cpu(CPU_LR35902 &cpu);
 uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address);
 void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value);
+void cpu_set_joypad_button(CPU_LR35902 &cpu, JoypadButton button, bool pressed);
 uint16_t cpu_read16(CPU_LR35902 &cpu, uint16_t address);
 void cpu_push16(CPU_LR35902 &cpu, uint16_t val);
 uint16_t cpu_pop16(CPU_LR35902 &cpu);

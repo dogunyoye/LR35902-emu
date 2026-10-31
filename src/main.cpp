@@ -34,6 +34,7 @@ namespace
     void initialize_demo_vram(CPU_LR35902 &cpu)
     {
         std::fill(cpu.memory.begin(), cpu.memory.end(), 0);
+        cpu.memory[0xFF00] = 0xCF;
         cpu.memory[0xFF40] = 0x91;
         cpu.memory[0xFF47] = 0xE4;
 
@@ -119,6 +120,39 @@ namespace
 
         std::vector<uint8_t> rom((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         return load_rom_only_cartridge(cpu, std::move(rom), error);
+    }
+
+    void update_joypad_from_key(CPU_LR35902 &cpu, SDL_Keycode key, bool pressed)
+    {
+        switch (key)
+        {
+        case SDLK_RIGHT:
+            cpu_set_joypad_button(cpu, JoypadButton::Right, pressed);
+            break;
+        case SDLK_LEFT:
+            cpu_set_joypad_button(cpu, JoypadButton::Left, pressed);
+            break;
+        case SDLK_UP:
+            cpu_set_joypad_button(cpu, JoypadButton::Up, pressed);
+            break;
+        case SDLK_DOWN:
+            cpu_set_joypad_button(cpu, JoypadButton::Down, pressed);
+            break;
+        case SDLK_z:
+            cpu_set_joypad_button(cpu, JoypadButton::A, pressed);
+            break;
+        case SDLK_x:
+            cpu_set_joypad_button(cpu, JoypadButton::B, pressed);
+            break;
+        case SDLK_RSHIFT:
+            cpu_set_joypad_button(cpu, JoypadButton::Select, pressed);
+            break;
+        case SDLK_RETURN:
+            cpu_set_joypad_button(cpu, JoypadButton::Start, pressed);
+            break;
+        default:
+            break;
+        }
     }
 }
 
@@ -235,11 +269,17 @@ int main(int argc, char **argv)
             {
                 running = false;
             }
-            else if (event.type == SDL_KEYDOWN)
+            else if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP)
             {
-                if (event.key.keysym.sym == SDLK_ESCAPE)
+                const bool pressed = event.type == SDL_KEYDOWN;
+                const SDL_Keycode key = event.key.keysym.sym;
+                if (pressed && key == SDLK_ESCAPE)
                 {
                     running = false;
+                }
+                else
+                {
+                    update_joypad_from_key(cpu, key, pressed);
                 }
             }
         }
