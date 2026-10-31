@@ -16,6 +16,7 @@ namespace
     constexpr int GB_WIDTH = 160;
     constexpr int GB_HEIGHT = 144;
     constexpr int SCALE = 4;
+    constexpr int CYCLES_PER_FRAME = 70224;
 
     void print_usage(const char *program_name)
     {
@@ -256,6 +257,10 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    SDL_RendererInfo renderer_info{};
+    const bool renderer_vsync = SDL_GetRendererInfo(renderer, &renderer_info) == 0 &&
+                                (renderer_info.flags & SDL_RENDERER_PRESENTVSYNC) != 0;
+
     SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888,
                                              SDL_TEXTUREACCESS_STREAMING, GB_WIDTH,
                                              GB_HEIGHT);
@@ -270,6 +275,7 @@ int main(int argc, char **argv)
 
     std::vector<uint32_t> framebuffer(static_cast<std::size_t>(GB_WIDTH) * GB_HEIGHT, 0);
     bool running = true;
+    int cycle_accumulator = 0;
 
     while (running)
     {
@@ -289,11 +295,13 @@ int main(int argc, char **argv)
             }
         }
 
-        if (!cpu.halted)
+        while (running && cycle_accumulator < CYCLES_PER_FRAME)
         {
-            const int cycles = execute_instruction(cpu);
-            update_timers(cpu, cycles);
+            cycle_accumulator += step_cpu(cpu);
         }
+        if (!running)
+            break;
+        cycle_accumulator -= CYCLES_PER_FRAME;
 
         fill_framebuffer(framebuffer, cpu);
 
@@ -302,7 +310,10 @@ int main(int argc, char **argv)
         SDL_RenderCopy(renderer, texture, nullptr, nullptr);
         SDL_RenderPresent(renderer);
 
-        SDL_Delay(16);
+        if (!renderer_vsync)
+        {
+            SDL_Delay(16);
+        }
     }
 
     SDL_DestroyTexture(texture);

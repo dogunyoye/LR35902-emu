@@ -429,7 +429,16 @@ uint16_t cpu_pop16(CPU_LR35902 &cpu)
 
 int execute_instruction(CPU_LR35902 &cpu)
 {
-    uint8_t opcode = cpu_read(cpu, cpu.pc++);
+    const uint8_t pending_ime_enable = cpu.ime_enable_delay;
+    const uint8_t opcode = cpu_read(cpu, cpu.pc);
+    if (cpu.halt_bug)
+    {
+        cpu.halt_bug = false;
+    }
+    else
+    {
+        cpu.pc++;
+    }
     int cycles = 4;
 
     switch (opcode)
@@ -1375,17 +1384,28 @@ int execute_instruction(CPU_LR35902 &cpu)
     }
 
     case 0xFB: // EI
-        cpu.ime = true;
+        if (!cpu.ime && cpu.ime_enable_delay == 0)
+        {
+            cpu.ime_enable_delay = 1;
+        }
         cycles = 4;
         break;
 
     case 0xF3: // DI
         cpu.ime = false;
+        cpu.ime_enable_delay = 0;
         cycles = 4;
         break;
 
     case 0x76: // HALT
-        cpu.halted = true;
+        if (!cpu.ime && (cpu.memory[0xFFFF] & cpu.memory[0xFF0F] & 0x1F) != 0)
+        {
+            cpu.halt_bug = true;
+        }
+        else
+        {
+            cpu.halted = true;
+        }
         cycles = 4;
         break;
 
@@ -1484,5 +1504,53 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
     }
 
+    if (opcode != 0xF3 && pending_ime_enable > 0)
+    {
+        cpu.ime_enable_delay = static_cast<uint8_t>(pending_ime_enable - 1);
+        if (cpu.ime_enable_delay == 0)
+        {
+            cpu.ime = true;
+        }
+    }
+
+    return cycles;
+}
+
+int step_cpu(CPU_LR35902 &cpu)
+{
+    constexpr uint16_t INTERRUPT_ENABLE = 0xFFFF;
+    constexpr uint16_t INTERRUPT_FLAGS = 0xFF0F;
+    const uint8_t pending_interrupts = static_cast<uint8_t>(
+        cpu.memory[INTERRUPT_ENABLE] & cpu.memory[INTERRUPT_FLAGS] & 0x1F);
+
+    if (cpu.halted)
+    {
+        if (pending_interrupts == 0)
+        {
+            update_timers(cpu, 4);
+            return 4;
+        }
+        cpu.halted = false;
+    }
+
+    if (cpu.ime && pending_interrupts != 0)
+    {
+        uint8_t interrupt_bit = 0;
+        while ((pending_interrupts & (1u << interrupt_bit)) == 0)
+        {
+            ++interrupt_bit;
+        }
+
+        cpu.ime = false;
+        cpu.ime_enable_delay = 0;
+        cpu.memory[INTERRUPT_FLAGS] &= static_cast<uint8_t>(~(1u << interrupt_bit));
+        cpu_push16(cpu, cpu.pc);
+        cpu.pc = static_cast<uint16_t>(0x0040 + interrupt_bit * 8);
+        update_timers(cpu, 20);
+        return 20;
+    }
+
+    const int cycles = execute_instruction(cpu);
+    update_timers(cpu, cycles);
     return cycles;
 }

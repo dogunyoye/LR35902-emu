@@ -449,6 +449,89 @@ static void test_missing_arithmetic_and_load_opcodes()
     assert(get_flag(load_hl_cpu, FLAG_C));
 }
 
+static void test_ei_is_delayed_until_after_next_instruction()
+{
+    CPU_LR35902 cpu{};
+    cpu.memory[0] = 0xFB; // EI
+    cpu.memory[1] = 0x00; // NOP
+
+    assert(execute_instruction(cpu) == 4);
+    assert(!cpu.ime);
+    assert(execute_instruction(cpu) == 4);
+    assert(cpu.ime);
+}
+
+static void test_interrupt_dispatch_and_priority()
+{
+    CPU_LR35902 cpu{};
+    cpu.pc = 0x1234;
+    cpu.sp = 0xFFFE;
+    cpu.ime = true;
+    cpu.memory[0xFFFF] = 0x15;
+    cpu.memory[0xFF0F] = 0x15;
+
+    assert(step_cpu(cpu) == 20);
+    assert(cpu.pc == 0x0040);
+    assert(cpu.sp == 0xFFFC);
+    assert(cpu.memory[0xFFFC] == 0x34);
+    assert(cpu.memory[0xFFFD] == 0x12);
+    assert(cpu.memory[0xFF0F] == 0x14);
+    assert(!cpu.ime);
+}
+
+static void test_ei_delay_before_interrupt_dispatch()
+{
+    CPU_LR35902 cpu{};
+    cpu.sp = 0xFFFE;
+    cpu.memory[0] = 0xFB; // EI
+    cpu.memory[1] = 0x00; // NOP
+    cpu.memory[0xFFFF] = 0x01;
+    cpu.memory[0xFF0F] = 0x01;
+
+    assert(step_cpu(cpu) == 4);
+    assert(!cpu.ime);
+    assert(step_cpu(cpu) == 4);
+    assert(cpu.ime);
+    assert(cpu.pc == 2);
+    assert(step_cpu(cpu) == 20);
+    assert(cpu.pc == 0x0040);
+    assert(cpu.memory[0xFFFC] == 2);
+    assert(cpu.memory[0xFFFD] == 0);
+}
+
+static void test_halt_idle_wake_and_bug()
+{
+    CPU_LR35902 cpu{};
+    cpu.pc = 0x0100;
+    cpu.halted = true;
+    cpu.memory[0x0100] = 0x3E; // LD A, d8
+    cpu.memory[0x0101] = 0x99;
+
+    assert(step_cpu(cpu) == 4);
+    assert(cpu.halted);
+    assert(cpu.pc == 0x0100);
+
+    cpu.memory[0xFFFF] = 0x01;
+    cpu.memory[0xFF0F] = 0x01;
+    assert(step_cpu(cpu) == 8);
+    assert(!cpu.halted);
+    assert(cpu.af.reg8.high == 0x99);
+    assert(cpu.pc == 0x0102);
+
+    CPU_LR35902 halt_bug_cpu{};
+    halt_bug_cpu.memory[0] = 0x76; // HALT with a pending interrupt and IME clear
+    halt_bug_cpu.memory[1] = 0x3E; // LD A, d8
+    halt_bug_cpu.memory[2] = 0x42;
+    halt_bug_cpu.memory[0xFFFF] = 0x01;
+    halt_bug_cpu.memory[0xFF0F] = 0x01;
+    assert(step_cpu(halt_bug_cpu) == 4);
+    assert(!halt_bug_cpu.halted);
+    assert(halt_bug_cpu.halt_bug);
+    assert(step_cpu(halt_bug_cpu) == 8);
+    assert(halt_bug_cpu.af.reg8.high == 0x3E);
+    assert(halt_bug_cpu.pc == 2);
+}
+
 int main()
 {
     test_load_and_add();
@@ -464,5 +547,9 @@ int main()
     test_cb_rotate_shift_opcodes();
     test_missing_control_flow_opcodes();
     test_missing_arithmetic_and_load_opcodes();
+    test_ei_is_delayed_until_after_next_instruction();
+    test_interrupt_dispatch_and_priority();
+    test_ei_delay_before_interrupt_dispatch();
+    test_halt_idle_wake_and_bug();
     return 0;
 }

@@ -26,6 +26,10 @@ struct CPU_LR35902
 
     bool halted;
     bool ime; // Interrupt Master Enable flag
+    bool halt_bug = false;
+    uint8_t ime_enable_delay = 0;
+    uint16_t div_cycle_accumulator = 0;
+    uint16_t tima_cycle_accumulator = 0;
 
     // Memory routing state.
     bool cart_ram_enabled = false;
@@ -62,6 +66,7 @@ inline bool get_flag(const CPU_LR35902 &cpu, uint8_t flag)
 }
 
 int execute_instruction(CPU_LR35902 &cpu);
+int step_cpu(CPU_LR35902 &cpu);
 uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address);
 void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value);
 uint16_t cpu_read16(CPU_LR35902 &cpu, uint16_t address);

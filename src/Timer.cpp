@@ -1,16 +1,12 @@
 #include "LR35902.h"
 
-// Internal counter to track elapsed T-cycles for DIV and TIMA
-static uint16_t div_counter = 0;
-static uint16_t tima_counter = 0;
-
 void update_timers(CPU_LR35902 &cpu, int cycles)
 {
     // 1. Update DIV Register (Increments every 256 T-cycles)
-    div_counter += cycles;
-    if (div_counter >= 256)
+    cpu.div_cycle_accumulator += cycles;
+    while (cpu.div_cycle_accumulator >= 256)
     {
-        div_counter -= 256;
+        cpu.div_cycle_accumulator -= 256;
         cpu.memory[0xFF04]++; // Increment DIV (rolls over automatically from 0xFF to 0)
     }
 
@@ -20,7 +16,7 @@ void update_timers(CPU_LR35902 &cpu, int cycles)
 
     if (timer_enabled)
     {
-        tima_counter += cycles;
+        cpu.tima_cycle_accumulator += cycles;
 
         // Determine threshold based on TAC frequency bits (bits 0-1)
         // 00: 4096 Hz   (every 1024 cycles)
@@ -44,9 +40,9 @@ void update_timers(CPU_LR35902 &cpu, int cycles)
             break;
         }
 
-        while (tima_counter >= threshold)
+        while (cpu.tima_cycle_accumulator >= threshold)
         {
-            tima_counter -= threshold;
+            cpu.tima_cycle_accumulator -= threshold;
 
             // If TIMA overflows (> 0xFF), reload from TMA and request interrupt
             if (cpu.memory[0xFF05] == 0xFF)
