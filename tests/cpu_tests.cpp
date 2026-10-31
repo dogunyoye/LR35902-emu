@@ -268,6 +268,187 @@ static void test_rom_only_cartridge()
     assert(!error.empty());
 }
 
+static void test_cb_rotate_shift_opcodes()
+{
+    struct RotateCase
+    {
+        uint8_t opcode;
+        uint8_t input;
+        bool initial_carry;
+        uint8_t expected;
+        bool expected_carry;
+        bool expected_zero;
+    };
+
+    const RotateCase cases[] = {
+        {0x08, 0x01, false, 0x80, true, false}, // RRC B
+        {0x10, 0x80, true, 0x01, true, false},  // RL B
+        {0x18, 0x01, true, 0x80, true, false},  // RR B
+        {0x20, 0x80, false, 0x00, true, true},  // SLA B
+        {0x28, 0x81, false, 0xC0, true, false}, // SRA B
+        {0x30, 0xF0, true, 0x0F, false, false}, // SWAP B
+        {0x38, 0x01, false, 0x00, true, true},  // SRL B
+    };
+
+    for (const RotateCase &test_case : cases)
+    {
+        CPU_LR35902 cpu{};
+        cpu.bc.reg8.high = test_case.input;
+        set_flag(cpu, FLAG_C, test_case.initial_carry);
+        cpu.memory[0x0000] = 0xCB;
+        cpu.memory[0x0001] = test_case.opcode;
+
+        assert(execute_instruction(cpu) == 8);
+        assert(cpu.bc.reg8.high == test_case.expected);
+        assert(get_flag(cpu, FLAG_Z) == test_case.expected_zero);
+        assert(!get_flag(cpu, FLAG_N));
+        assert(!get_flag(cpu, FLAG_H));
+        assert(get_flag(cpu, FLAG_C) == test_case.expected_carry);
+    }
+
+    CPU_LR35902 cpu{};
+    cpu.hl.reg16 = 0xC000;
+    cpu.memory[0x0000] = 0xCB;
+    cpu.memory[0x0001] = 0x0E; // RRC (HL)
+    cpu.memory[0xC000] = 0x01;
+    assert(execute_instruction(cpu) == 16);
+    assert(cpu.memory[0xC000] == 0x80);
+    assert(get_flag(cpu, FLAG_C));
+}
+
+static void test_missing_control_flow_opcodes()
+{
+    struct ConditionalCase
+    {
+        uint8_t opcode;
+        uint8_t flag;
+        bool branch_when_set;
+    };
+
+    const ConditionalCase call_cases[] = {
+        {0xCC, FLAG_Z, true},  // CALL Z, a16
+        {0xD4, FLAG_C, false}, // CALL NC, a16
+        {0xDC, FLAG_C, true},  // CALL C, a16
+    };
+
+    for (const ConditionalCase &test_case : call_cases)
+    {
+        for (bool taken : {false, true})
+        {
+            CPU_LR35902 cpu{};
+            cpu.sp = 0xFFFE;
+            set_flag(cpu, test_case.flag, test_case.branch_when_set == taken);
+            cpu.memory[0] = test_case.opcode;
+            cpu.memory[1] = 0x34;
+            cpu.memory[2] = 0x12;
+
+            assert(execute_instruction(cpu) == (taken ? 24 : 12));
+            assert(cpu.pc == (taken ? 0x1234 : 0x0003));
+            assert(cpu.sp == (taken ? 0xFFFC : 0xFFFE));
+            if (taken)
+            {
+                assert(cpu.memory[0xFFFC] == 0x03);
+                assert(cpu.memory[0xFFFD] == 0x00);
+            }
+        }
+    }
+
+    const ConditionalCase jump_cases[] = {
+        {0xD2, FLAG_C, false}, // JP NC, a16
+        {0xDA, FLAG_C, true},  // JP C, a16
+    };
+
+    for (const ConditionalCase &test_case : jump_cases)
+    {
+        for (bool taken : {false, true})
+        {
+            CPU_LR35902 cpu{};
+            set_flag(cpu, test_case.flag, test_case.branch_when_set == taken);
+            cpu.memory[0] = test_case.opcode;
+            cpu.memory[1] = 0x34;
+            cpu.memory[2] = 0x12;
+
+            assert(execute_instruction(cpu) == (taken ? 16 : 12));
+            assert(cpu.pc == (taken ? 0x1234 : 0x0003));
+        }
+    }
+
+    CPU_LR35902 ret_cpu{};
+    ret_cpu.sp = 0xC000;
+    ret_cpu.memory[0] = 0xD0; // RET NC
+    ret_cpu.memory[0xC000] = 0x34;
+    ret_cpu.memory[0xC001] = 0x12;
+    assert(execute_instruction(ret_cpu) == 20);
+    assert(ret_cpu.pc == 0x1234);
+    assert(ret_cpu.sp == 0xC002);
+
+    CPU_LR35902 reti_cpu{};
+    reti_cpu.sp = 0xC000;
+    reti_cpu.memory[0] = 0xD9; // RETI
+    reti_cpu.memory[0xC000] = 0x78;
+    reti_cpu.memory[0xC001] = 0x56;
+    assert(execute_instruction(reti_cpu) == 16);
+    assert(reti_cpu.pc == 0x5678);
+    assert(reti_cpu.sp == 0xC002);
+    assert(reti_cpu.ime);
+}
+
+static void test_missing_arithmetic_and_load_opcodes()
+{
+    CPU_LR35902 sbc_cpu{};
+    sbc_cpu.af.reg8.high = 0x10;
+    set_flag(sbc_cpu, FLAG_C, true);
+    sbc_cpu.memory[0] = 0xDE; // SBC A, d8
+    sbc_cpu.memory[1] = 0x0F;
+    assert(execute_instruction(sbc_cpu) == 8);
+    assert(sbc_cpu.af.reg8.high == 0x00);
+    assert(get_flag(sbc_cpu, FLAG_Z));
+    assert(get_flag(sbc_cpu, FLAG_N));
+    assert(get_flag(sbc_cpu, FLAG_H));
+    assert(!get_flag(sbc_cpu, FLAG_C));
+
+    CPU_LR35902 xor_cpu{};
+    xor_cpu.af.reg8.high = 0x0F;
+    xor_cpu.memory[0] = 0xEE; // XOR d8
+    xor_cpu.memory[1] = 0xF0;
+    assert(execute_instruction(xor_cpu) == 8);
+    assert(xor_cpu.af.reg8.high == 0xFF);
+    assert(!get_flag(xor_cpu, FLAG_Z));
+    assert(!get_flag(xor_cpu, FLAG_N));
+    assert(!get_flag(xor_cpu, FLAG_H));
+    assert(!get_flag(xor_cpu, FLAG_C));
+
+    CPU_LR35902 load_cpu{};
+    load_cpu.bc.reg8.low = 0x80;
+    load_cpu.memory[0] = 0xF2; // LD A, (C)
+    load_cpu.memory[0xFF80] = 0xA5;
+    assert(execute_instruction(load_cpu) == 8);
+    assert(load_cpu.af.reg8.high == 0xA5);
+
+    CPU_LR35902 add_sp_cpu{};
+    add_sp_cpu.sp = 0x0001;
+    add_sp_cpu.memory[0] = 0xE8; // ADD SP, e8
+    add_sp_cpu.memory[1] = 0xFF;
+    assert(execute_instruction(add_sp_cpu) == 16);
+    assert(add_sp_cpu.sp == 0x0000);
+    assert(!get_flag(add_sp_cpu, FLAG_Z));
+    assert(!get_flag(add_sp_cpu, FLAG_N));
+    assert(get_flag(add_sp_cpu, FLAG_H));
+    assert(get_flag(add_sp_cpu, FLAG_C));
+
+    CPU_LR35902 load_hl_cpu{};
+    load_hl_cpu.sp = 0xFFF8;
+    load_hl_cpu.memory[0] = 0xF8; // LD HL, SP+e8
+    load_hl_cpu.memory[1] = 0x08;
+    assert(execute_instruction(load_hl_cpu) == 12);
+    assert(load_hl_cpu.hl.reg16 == 0x0000);
+    assert(load_hl_cpu.sp == 0xFFF8);
+    assert(!get_flag(load_hl_cpu, FLAG_Z));
+    assert(!get_flag(load_hl_cpu, FLAG_N));
+    assert(get_flag(load_hl_cpu, FLAG_H));
+    assert(get_flag(load_hl_cpu, FLAG_C));
+}
+
 int main()
 {
     test_load_and_add();
@@ -280,5 +461,8 @@ int main()
     test_instruction_cycle_counts();
     test_control_flow_cycle_counts();
     test_rom_only_cartridge();
+    test_cb_rotate_shift_opcodes();
+    test_missing_control_flow_opcodes();
+    test_missing_arithmetic_and_load_opcodes();
     return 0;
 }

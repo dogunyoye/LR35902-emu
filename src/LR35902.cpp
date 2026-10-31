@@ -228,7 +228,7 @@ namespace
             }
         };
 
-        switch (cb_opcode & 0xC0)
+        switch (cb_opcode & 0xF8)
         {
         case 0x00:
         {
@@ -391,9 +391,14 @@ namespace
         set_c_flag(cpu, total > 0xFFFFu);
     }
 
-    uint8_t signed_e8_to_u8(uint8_t value)
+    uint16_t add_sp_offset(CPU_LR35902 &cpu, uint8_t offset)
     {
-        return static_cast<uint8_t>(value);
+        const uint16_t old_sp = cpu.sp;
+        const uint16_t result = static_cast<uint16_t>(static_cast<int32_t>(old_sp) + static_cast<int8_t>(offset));
+        cpu.af.reg8.low = 0;
+        set_h_flag(cpu, ((old_sp & 0x0F) + (offset & 0x0F)) > 0x0F);
+        set_c_flag(cpu, ((old_sp & 0xFF) + offset) > 0xFF);
+        return result;
     }
 } // namespace
 
@@ -1063,6 +1068,22 @@ int execute_instruction(CPU_LR35902 &cpu)
         }
         break;
 
+    case 0xCC: // CALL Z, a16
+        if (get_flag(cpu, FLAG_Z))
+        {
+            const uint16_t target = cpu_read16(cpu, cpu.pc);
+            cpu.pc += 2;
+            cpu_push16(cpu, cpu.pc);
+            cpu.pc = target;
+            cycles = 24;
+        }
+        else
+        {
+            cpu.pc += 2;
+            cycles = 12;
+        }
+        break;
+
     case 0xC5: // PUSH BC
         cpu_push16(cpu, cpu.bc.reg16);
         cycles = 16;
@@ -1130,6 +1151,47 @@ int execute_instruction(CPU_LR35902 &cpu)
         cycles = 12;
         break;
 
+    case 0xD0: // RET NC
+        if (!get_flag(cpu, FLAG_C))
+        {
+            cpu.pc = cpu_pop16(cpu);
+            cycles = 20;
+        }
+        else
+        {
+            cycles = 8;
+        }
+        break;
+
+    case 0xD2: // JP NC, a16
+        if (!get_flag(cpu, FLAG_C))
+        {
+            cpu.pc = cpu_read16(cpu, cpu.pc);
+            cycles = 16;
+        }
+        else
+        {
+            cpu.pc += 2;
+            cycles = 12;
+        }
+        break;
+
+    case 0xD4: // CALL NC, a16
+        if (!get_flag(cpu, FLAG_C))
+        {
+            const uint16_t target = cpu_read16(cpu, cpu.pc);
+            cpu.pc += 2;
+            cpu_push16(cpu, cpu.pc);
+            cpu.pc = target;
+            cycles = 24;
+        }
+        else
+        {
+            cpu.pc += 2;
+            cycles = 12;
+        }
+        break;
+
     case 0xD5: // PUSH DE
         cpu_push16(cpu, cpu.de.reg16);
         cycles = 16;
@@ -1140,6 +1202,53 @@ int execute_instruction(CPU_LR35902 &cpu)
         uint8_t immediate = cpu_read(cpu, cpu.pc++);
         uint8_t result = static_cast<uint8_t>(cpu.af.reg8.high - immediate);
         apply_sub_flags(cpu, cpu.af.reg8.high, immediate, false, result);
+        cpu.af.reg8.high = result;
+        cycles = 8;
+        break;
+    }
+
+    case 0xD9: // RETI
+        cpu.pc = cpu_pop16(cpu);
+        cpu.ime = true;
+        cycles = 16;
+        break;
+
+    case 0xDA: // JP C, a16
+        if (get_flag(cpu, FLAG_C))
+        {
+            cpu.pc = cpu_read16(cpu, cpu.pc);
+            cycles = 16;
+        }
+        else
+        {
+            cpu.pc += 2;
+            cycles = 12;
+        }
+        break;
+
+    case 0xDC: // CALL C, a16
+        if (get_flag(cpu, FLAG_C))
+        {
+            const uint16_t target = cpu_read16(cpu, cpu.pc);
+            cpu.pc += 2;
+            cpu_push16(cpu, cpu.pc);
+            cpu.pc = target;
+            cycles = 24;
+        }
+        else
+        {
+            cpu.pc += 2;
+            cycles = 12;
+        }
+        break;
+
+    case 0xDE: // SBC A, d8
+    {
+        const uint8_t immediate = cpu_read(cpu, cpu.pc++);
+        const uint8_t a = cpu.af.reg8.high;
+        const bool carry = get_flag(cpu, FLAG_C);
+        const uint8_t result = make_8bit_sub_result(a, immediate, carry);
+        apply_sub_flags(cpu, a, immediate, carry, result);
         cpu.af.reg8.high = result;
         cycles = 8;
         break;
@@ -1177,6 +1286,11 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
     }
 
+    case 0xE8: // ADD SP, e8
+        cpu.sp = add_sp_offset(cpu, cpu_read(cpu, cpu.pc++));
+        cycles = 16;
+        break;
+
     case 0xE9: // JP (HL)
         cpu.pc = cpu.hl.reg16;
         cycles = 4;
@@ -1191,6 +1305,14 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
     }
 
+    case 0xEE: // XOR d8
+    {
+        cpu.af.reg8.high ^= cpu_read(cpu, cpu.pc++);
+        apply_logic_flags(cpu, cpu.af.reg8.high, cpu.af.reg8.high == 0);
+        cycles = 8;
+        break;
+    }
+
     case 0xF0: // LDH A, (a8)
     {
         uint8_t addr = cpu_read(cpu, cpu.pc++);
@@ -1198,6 +1320,11 @@ int execute_instruction(CPU_LR35902 &cpu)
         cycles = 12;
         break;
     }
+
+    case 0xF2: // LD A, (C)
+        cpu.af.reg8.high = cpu_read(cpu, static_cast<uint16_t>(0xFF00u + cpu.bc.reg8.low));
+        cycles = 8;
+        break;
 
     case 0xF1: // POP AF
         cpu.af.reg16 = cpu_pop16(cpu);
@@ -1218,6 +1345,11 @@ int execute_instruction(CPU_LR35902 &cpu)
         cycles = 8;
         break;
     }
+
+    case 0xF8: // LD HL, SP+e8
+        cpu.hl.reg16 = add_sp_offset(cpu, cpu_read(cpu, cpu.pc++));
+        cycles = 12;
+        break;
 
     case 0xF9: // LD SP, HL
         cpu.sp = cpu.hl.reg16;
