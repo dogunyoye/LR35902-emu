@@ -1,4 +1,5 @@
 #include "LR35902.h"
+#include "PPU.h"
 
 #include <cassert>
 #include <utility>
@@ -532,6 +533,52 @@ static void test_halt_idle_wake_and_bug()
     assert(halt_bug_cpu.pc == 2);
 }
 
+static void test_ppu_modes_scanlines_and_background()
+{
+    CPU_LR35902 cpu{};
+    PPU_LR35902 ppu{};
+    cpu.memory[0xFF40] = 0x91; // LCD on, unsigned tile data, background on
+    cpu.memory[0xFF47] = 0xE4;
+    cpu.memory[0x9800] = 0;
+    cpu.memory[0x8000] = 0x80; // Pixel 0 of tile row 0 uses color index 1
+
+    update_ppu(cpu, ppu, 80);
+    assert((cpu.memory[0xFF41] & 0x03) == 3);
+    assert(cpu.vram_locked);
+    assert(cpu.oam_locked);
+    assert(cpu_read(cpu, 0x8000) == 0xFF);
+
+    update_ppu(cpu, ppu, 172);
+    assert((cpu.memory[0xFF41] & 0x03) == 0);
+    assert(!cpu.vram_locked);
+    assert(!cpu.oam_locked);
+    assert(ppu.framebuffer[0] == 0xFF3A5F40);
+    assert(ppu.framebuffer[1] == 0xFF081820);
+
+    update_ppu(cpu, ppu, 204);
+    assert(cpu.memory[0xFF44] == 1);
+    assert((cpu.memory[0xFF41] & 0x03) == 2);
+    assert(cpu.oam_locked);
+
+    update_ppu(cpu, ppu, 143 * 456);
+    assert(cpu.memory[0xFF44] == 144);
+    assert((cpu.memory[0xFF41] & 0x03) == 1);
+    assert((cpu.memory[0xFF0F] & 0x01) != 0);
+    assert(!cpu.vram_locked);
+    assert(!cpu.oam_locked);
+
+    update_ppu(cpu, ppu, 10 * 456);
+    assert(cpu.memory[0xFF44] == 0);
+    assert((cpu.memory[0xFF41] & 0x03) == 2);
+
+    cpu.memory[0xFF40] = 0;
+    update_ppu(cpu, ppu, 4);
+    assert(cpu.memory[0xFF44] == 0);
+    assert((cpu.memory[0xFF41] & 0x03) == 0);
+    assert(!cpu.vram_locked);
+    assert(!cpu.oam_locked);
+}
+
 int main()
 {
     test_load_and_add();
@@ -551,5 +598,6 @@ int main()
     test_interrupt_dispatch_and_priority();
     test_ei_delay_before_interrupt_dispatch();
     test_halt_idle_wake_and_bug();
+    test_ppu_modes_scanlines_and_background();
     return 0;
 }

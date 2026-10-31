@@ -1,4 +1,5 @@
 #include "LR35902.h"
+#include "PPU.h"
 
 #include <SDL2/SDL.h>
 
@@ -13,8 +14,8 @@
 
 namespace
 {
-    constexpr int GB_WIDTH = 160;
-    constexpr int GB_HEIGHT = 144;
+    constexpr int GB_WIDTH = PPU_LR35902::WIDTH;
+    constexpr int GB_HEIGHT = PPU_LR35902::HEIGHT;
     constexpr int SCALE = 4;
     constexpr int CYCLES_PER_FRAME = 70224;
 
@@ -30,32 +31,10 @@ namespace
                   << "  " << program_name << " --help\n";
     }
 
-    uint32_t palette_color(int value)
-    {
-        switch (value)
-        {
-        case 0:
-            return 0xFF081820;
-        case 1:
-            return 0xFF3A5F40;
-        case 2:
-            return 0xFF9BBC0F;
-        default:
-            return 0xFFFFFFFF;
-        }
-    }
-
-    uint32_t palette_from_bgp(const CPU_LR35902 &cpu, uint8_t color_index)
-    {
-        const uint8_t bgp = cpu.memory[0xFF47];
-        const uint8_t shift = static_cast<uint8_t>(color_index * 2u);
-        const uint8_t value = static_cast<uint8_t>((bgp >> shift) & 0x03u);
-        return palette_color(value);
-    }
-
     void initialize_demo_vram(CPU_LR35902 &cpu)
     {
         std::fill(cpu.memory.begin(), cpu.memory.end(), 0);
+        cpu.memory[0xFF40] = 0x91;
         cpu.memory[0xFF47] = 0xE4;
 
         for (int tile = 0; tile < 32; ++tile)
@@ -92,36 +71,6 @@ namespace
             {
                 const uint8_t tile_id = static_cast<uint8_t>((tile_x + tile_y) % 32);
                 cpu.memory[0x9800 + static_cast<uint16_t>(tile_y * 32 + tile_x)] = tile_id;
-            }
-        }
-    }
-
-    void fill_framebuffer(std::vector<uint32_t> &framebuffer, const CPU_LR35902 &cpu)
-    {
-        std::fill(framebuffer.begin(), framebuffer.end(), palette_color(0));
-
-        for (int tile_y = 0; tile_y < 18; ++tile_y)
-        {
-            for (int tile_x = 0; tile_x < 20; ++tile_x)
-            {
-                const uint8_t tile_id = cpu.memory[0x9800 + static_cast<uint16_t>(tile_y * 32 + tile_x)];
-                const uint16_t tile_base = 0x8000 + static_cast<uint16_t>(tile_id * 16);
-
-                for (int py = 0; py < 8; ++py)
-                {
-                    const uint8_t low = cpu.memory[tile_base + static_cast<uint16_t>(py * 2)];
-                    const uint8_t high = cpu.memory[tile_base + static_cast<uint16_t>(py * 2 + 1)];
-
-                    for (int px = 0; px < 8; ++px)
-                    {
-                        const uint8_t bit = static_cast<uint8_t>(1u << (7 - px));
-                        const uint8_t color_index = static_cast<uint8_t>(((low & bit) ? 1u : 0u) | ((high & bit) ? 2u : 0u));
-                        const int screen_x = tile_x * 8 + px;
-                        const int screen_y = tile_y * 8 + py;
-
-                        framebuffer[static_cast<std::size_t>(screen_y) * GB_WIDTH + screen_x] = palette_from_bgp(cpu, color_index);
-                    }
-                }
             }
         }
     }
@@ -273,7 +222,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    std::vector<uint32_t> framebuffer(static_cast<std::size_t>(GB_WIDTH) * GB_HEIGHT, 0);
+    PPU_LR35902 ppu{};
     bool running = true;
     int cycle_accumulator = 0;
 
@@ -297,15 +246,15 @@ int main(int argc, char **argv)
 
         while (running && cycle_accumulator < CYCLES_PER_FRAME)
         {
-            cycle_accumulator += step_cpu(cpu);
+            const int cycles = step_cpu(cpu);
+            update_ppu(cpu, ppu, cycles);
+            cycle_accumulator += cycles;
         }
         if (!running)
             break;
         cycle_accumulator -= CYCLES_PER_FRAME;
 
-        fill_framebuffer(framebuffer, cpu);
-
-        SDL_UpdateTexture(texture, nullptr, framebuffer.data(), GB_WIDTH * sizeof(uint32_t));
+        SDL_UpdateTexture(texture, nullptr, ppu.framebuffer.data(), GB_WIDTH * sizeof(uint32_t));
         SDL_RenderClear(renderer);
         SDL_RenderCopy(renderer, texture, nullptr, nullptr);
         SDL_RenderPresent(renderer);
