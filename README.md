@@ -17,7 +17,7 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | Timer registers (DIV/TIMA/TMA/TAC) and update logic | :white_check_mark: done |
 | Interrupt dispatch, priority, delayed EI, and HALT wake-up | :white_check_mark: done |
 | Cycle-driven CPU and timer stepping | :white_check_mark: done |
-| PPU mode timing, BG/window/sprite rendering, VBlank and STAT interrupts | :white_check_mark: done |
+| Approximate variable mode-3 timing, BG/window/sprite rendering, VBlank and STAT interrupts | :white_check_mark: done |
 | Regression tests for CPU, timer, interrupt, cartridge, and PPU behavior | :white_check_mark: done |
 | CLI runner with cycle-driven frames and ROM-only loading | :white_check_mark: done |
 | Cycle-exact CPU and peripheral conformance | :soon: planned |

@@ -62,7 +62,7 @@ static void test_ppu_window_composition()
     cpu.memory[0x8000] = 0xFF; // Background tile color index 1
     cpu.memory[0x8011] = 0xFF; // Window tile color index 2
 
-    update_ppu(cpu, ppu, 252);
+    update_ppu(cpu, ppu, 258);
     assert(ppu.framebuffer[79] == 0xFF3A5F40);
     assert(ppu.framebuffer[80] == 0xFF9BBC0F);
 }
@@ -84,7 +84,7 @@ static void test_ppu_sprite_priority_palettes_flips_and_8x16()
     priority_cpu.memory[0xFE06] = 2;
     priority_cpu.memory[0xFE07] = 0x10;
 
-    update_ppu(priority_cpu, priority_ppu, 252);
+    update_ppu(priority_cpu, priority_ppu, 268);
     assert(priority_ppu.framebuffer[4] == 0xFFFFFFFF);
 
     CPU_LR35902 flip_cpu{};
@@ -98,7 +98,7 @@ static void test_ppu_sprite_priority_palettes_flips_and_8x16()
     flip_cpu.memory[0xFE02] = 1;
     flip_cpu.memory[0xFE03] = 0x30; // OBJ palette 1 and horizontal flip
 
-    update_ppu(flip_cpu, flip_ppu, 252);
+    update_ppu(flip_cpu, flip_ppu, 263);
     assert(flip_ppu.framebuffer[0] == 0xFF081820);
     assert(flip_ppu.framebuffer[7] == 0xFFFFFFFF);
 
@@ -114,7 +114,7 @@ static void test_ppu_sprite_priority_palettes_flips_and_8x16()
     tall_cpu.memory[0xFE02] = 1;    // 8x16 mode ignores tile ID bit 0
     tall_cpu.memory[0xFE03] = 0x40; // Vertical flip
 
-    update_ppu(tall_cpu, tall_ppu, 252);
+    update_ppu(tall_cpu, tall_ppu, 263);
     assert(tall_ppu.framebuffer[0] == 0xFF9BBC0F);
 
     CPU_LR35902 hidden_cpu{};
@@ -129,7 +129,7 @@ static void test_ppu_sprite_priority_palettes_flips_and_8x16()
     hidden_cpu.memory[0xFE02] = 2;
     hidden_cpu.memory[0xFE03] = 0x80; // Behind nonzero background pixels
 
-    update_ppu(hidden_cpu, hidden_ppu, 252);
+    update_ppu(hidden_cpu, hidden_ppu, 263);
     assert(hidden_ppu.framebuffer[0] == 0xFF3A5F40);
 }
 
@@ -188,6 +188,49 @@ static void test_stat_lyc_interrupt_edges()
     assert((cpu.memory[0xFF0F] & 0x02) != 0);
 }
 
+static void test_variable_mode3_timing()
+{
+    CPU_LR35902 scroll_cpu{};
+    PPU_LR35902 scroll_ppu{};
+    scroll_cpu.memory[0xFF40] = 0x91;
+    scroll_cpu.memory[0xFF43] = 3;
+    update_ppu(scroll_cpu, scroll_ppu, 80);
+    update_ppu(scroll_cpu, scroll_ppu, 174);
+    assert((scroll_cpu.memory[0xFF41] & 0x03) == 3);
+    update_ppu(scroll_cpu, scroll_ppu, 1);
+    assert((scroll_cpu.memory[0xFF41] & 0x03) == 0);
+    update_ppu(scroll_cpu, scroll_ppu, 201);
+    assert(scroll_cpu.memory[0xFF44] == 1);
+
+    CPU_LR35902 window_cpu{};
+    PPU_LR35902 window_ppu{};
+    window_cpu.memory[0xFF40] = 0xF1;
+    window_cpu.memory[0xFF4A] = 0;
+    window_cpu.memory[0xFF4B] = 7;
+    update_ppu(window_cpu, window_ppu, 80);
+    update_ppu(window_cpu, window_ppu, 172);
+    assert((window_cpu.memory[0xFF41] & 0x03) == 3);
+    update_ppu(window_cpu, window_ppu, 6);
+    assert((window_cpu.memory[0xFF41] & 0x03) == 0);
+    update_ppu(window_cpu, window_ppu, 198);
+    assert(window_cpu.memory[0xFF44] == 1);
+
+    CPU_LR35902 sprite_cpu{};
+    PPU_LR35902 sprite_ppu{};
+    sprite_cpu.memory[0xFF40] = 0x93;
+    sprite_cpu.memory[0xFE00] = 16;
+    sprite_cpu.memory[0xFE01] = 8;
+    update_ppu(sprite_cpu, sprite_ppu, 80);
+    update_ppu(sprite_cpu, sprite_ppu, 172);
+    assert((sprite_cpu.memory[0xFF41] & 0x03) == 3);
+    update_ppu(sprite_cpu, sprite_ppu, 10);
+    assert((sprite_cpu.memory[0xFF41] & 0x03) == 3);
+    update_ppu(sprite_cpu, sprite_ppu, 1);
+    assert((sprite_cpu.memory[0xFF41] & 0x03) == 0);
+    update_ppu(sprite_cpu, sprite_ppu, 193);
+    assert(sprite_cpu.memory[0xFF44] == 1);
+}
+
 int main()
 {
     test_ppu_modes_scanlines_and_background();
@@ -195,5 +238,6 @@ int main()
     test_ppu_sprite_priority_palettes_flips_and_8x16();
     test_stat_mode_interrupt_edges();
     test_stat_lyc_interrupt_edges();
+    test_variable_mode3_timing();
     return 0;
 }

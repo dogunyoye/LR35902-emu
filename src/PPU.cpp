@@ -98,6 +98,46 @@ namespace
         return shade_color(shade);
     }
 
+    int calculate_mode3_duration(const CPU_LR35902 &cpu, int line)
+    {
+        const std::uint8_t lcdc = cpu.memory[LCDC];
+        int duration = 172 + (cpu.memory[SCX] & 0x07);
+
+        if ((lcdc & 0x01) != 0 && (lcdc & 0x20) != 0 &&
+            line >= cpu.memory[WY] && cpu.memory[WX] <= 166)
+        {
+            duration += 6;
+        }
+
+        if ((lcdc & 0x02) != 0)
+        {
+            const int sprite_height = (lcdc & 0x04) != 0 ? 16 : 8;
+            std::size_t selected_sprites = 0;
+            for (std::uint8_t index = 0; index < 40 && selected_sprites < 10; ++index)
+            {
+                const std::uint16_t address = static_cast<std::uint16_t>(OAM_START + index * 4);
+                const int top = static_cast<int>(cpu.memory[address]) - 16;
+                if (line < top || line >= top + sprite_height)
+                {
+                    continue;
+                }
+
+                ++selected_sprites;
+                const int sprite_x = cpu.memory[address + 1];
+                if (sprite_x == 0 || sprite_x >= 168)
+                {
+                    continue;
+                }
+
+                const int screen_x = sprite_x - 8;
+                const int alignment = (screen_x + (cpu.memory[SCX] & 0x07)) & 0x07;
+                duration += 11 - std::min(alignment, 5);
+            }
+        }
+
+        return duration;
+    }
+
     void render_scanline(const CPU_LR35902 &cpu, PPU_LR35902 &ppu)
     {
         const int y = cpu.memory[LY];
@@ -296,7 +336,7 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         }
         else if (ppu.mode == 3)
         {
-            mode_boundary = 252;
+            mode_boundary = 80 + ppu.mode3_duration;
         }
         else
         {
@@ -314,6 +354,7 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
 
         if (ppu.mode == 2)
         {
+            ppu.mode3_duration = calculate_mode3_duration(cpu, cpu.memory[LY]);
             update_status(cpu, ppu, 3);
         }
         else if (ppu.mode == 3)

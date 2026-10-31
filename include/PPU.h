@@ -14,6 +14,7 @@ struct PPU_LR35902
 
     std::array<std::uint32_t, PIXEL_COUNT> framebuffer{};
     int cycles_into_line = 0;
+    int mode3_duration = 172;
     std::uint8_t mode = 0;
     bool lcd_enabled = false;
     bool framebuffer_initialized = false;
