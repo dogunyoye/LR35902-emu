@@ -21,10 +21,16 @@ elseif(MSVC)
 endif()
 
 # Emulator core library (static for simple linking into future exe/tests)
-add_library(lr35902 STATIC src/Memory.cpp)
+add_library(lr35902 STATIC src/Memory.cpp src/LR35902.cpp)
 target_compile_features(lr35902 PUBLIC cxx_std_20)
 target_include_directories(lr35902 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(lr35902 PRIVATE lr35902_warnings)
+
+enable_testing()
+add_executable(cpu_tests tests/cpu_tests.cpp)
+target_include_directories(cpu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(cpu_tests PRIVATE lr35902 lr35902_warnings)
+add_test(NAME cpu_tests COMMAND cpu_tests)
 
 # Placeholder executable target — add main.cpp under src/ to enable.
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)

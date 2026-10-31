@@ -1,6 +1,6 @@
 #pragma once
-#include <cstdint>
 #include <array>
+#include <cstdint>
 
 union RegPair
 {
@@ -28,3 +28,32 @@ struct CPU_LR35902
     // 64KB Flat Address Space (will be replaced later with custom read/write routers)
     std::array<uint8_t, 65536> memory;
 };
+
+// Flag Bit Masks
+const uint8_t FLAG_Z = 0x80;
+const uint8_t FLAG_N = 0x40;
+const uint8_t FLAG_H = 0x20;
+const uint8_t FLAG_C = 0x10;
+
+// Inline Helpers
+inline void set_flag(CPU_LR35902 &cpu, uint8_t flag, bool value)
+{
+    if (value)
+    {
+        cpu.af.reg8.low |= flag;
+    }
+    else
+    {
+        cpu.af.reg8.low &= ~flag;
+    }
+}
+
+inline bool get_flag(const CPU_LR35902 &cpu, uint8_t flag)
+{
+    return (cpu.af.reg8.low & flag) != 0;
+}
+
+int execute_instruction(CPU_LR35902 &cpu);
+uint16_t cpu_read16(CPU_LR35902 &cpu, uint16_t address);
+void cpu_push16(CPU_LR35902 &cpu, uint16_t val);
+uint16_t cpu_pop16(CPU_LR35902 &cpu);

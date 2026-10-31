@@ -4,6 +4,10 @@ uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
 {
     // TODO: Intercept for MBC (Memory Bank Controller) ROM switching
     // TODO: Intercept for VRAM/OAM accessibility checks during PPU drawing modes
+    if (address >= 0xE000 && address < 0xFE00)
+    {
+        address -= 0x2000;
+    }
     return cpu.memory[address];
 }
 
@@ -20,6 +24,7 @@ void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
     if (address >= 0xE000 && address < 0xFE00)
     {
         cpu.memory[address - 0x2000] = value;
+        address -= 0x2000;
     }
 
     cpu.memory[address] = value;
