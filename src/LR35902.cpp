@@ -715,10 +715,13 @@ int execute_instruction(CPU_LR35902 &cpu)
     }
 
     case 0x29: // ADD HL, HL
-        cpu.hl.reg16 = static_cast<uint16_t>(cpu.hl.reg16 + cpu.hl.reg16);
-        apply_hl_add_flags(cpu, cpu.hl.reg16 - cpu.hl.reg16, cpu.hl.reg16);
+    {
+        const uint16_t old_hl = cpu.hl.reg16;
+        cpu.hl.reg16 = static_cast<uint16_t>(old_hl + old_hl);
+        apply_hl_add_flags(cpu, old_hl, old_hl);
         cycles = 8;
         break;
+    }
 
     case 0x2A: // LD A, (HL+)
         cpu.af.reg8.high = cpu_read(cpu, cpu.hl.reg16);

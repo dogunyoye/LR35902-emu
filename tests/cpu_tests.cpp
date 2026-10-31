@@ -131,6 +131,29 @@ static void test_add_hl_registers()
     assert(cpu.hl.reg16 == 0x2239);
 }
 
+static void test_add_hl_hl_flags()
+{
+    CPU_LR35902 half_carry_cpu{};
+    half_carry_cpu.hl.reg16 = 0x0800;
+    set_flag(half_carry_cpu, FLAG_Z, true);
+    half_carry_cpu.memory[0] = 0x29; // ADD HL, HL
+
+    assert(execute_instruction(half_carry_cpu) == 8);
+    assert(half_carry_cpu.hl.reg16 == 0x1000);
+    assert(get_flag(half_carry_cpu, FLAG_Z));
+    assert(!get_flag(half_carry_cpu, FLAG_N));
+    assert(get_flag(half_carry_cpu, FLAG_H));
+    assert(!get_flag(half_carry_cpu, FLAG_C));
+
+    CPU_LR35902 carry_cpu{};
+    carry_cpu.hl.reg16 = 0x9000;
+    carry_cpu.memory[0] = 0x29; // ADD HL, HL
+    assert(execute_instruction(carry_cpu) == 8);
+    assert(carry_cpu.hl.reg16 == 0x2000);
+    assert(!get_flag(carry_cpu, FLAG_H));
+    assert(get_flag(carry_cpu, FLAG_C));
+}
+
 static void test_flag_behavior_add_sub()
 {
     CPU_LR35902 cpu{};
@@ -537,6 +560,7 @@ int main()
     test_inc_dec_registers();
     test_inc_dec_preserve_carry();
     test_add_hl_registers();
+    test_add_hl_hl_flags();
     test_flag_behavior_add_sub();
     test_decimal_adjust();
     test_cb_prefixed_bit_and_rotate();
