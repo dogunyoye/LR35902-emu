@@ -17,6 +17,7 @@ struct PPU_LR35902
     std::uint8_t mode = 0;
     bool lcd_enabled = false;
     bool framebuffer_initialized = false;
+    bool stat_interrupt_line = false;
 };
 
 void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles);

@@ -52,6 +52,17 @@ namespace
 
         cpu.vram_locked = ppu.lcd_enabled && mode == 3;
         cpu.oam_locked = ppu.lcd_enabled && (mode == 2 || mode == 3);
+
+        const bool stat_line = ppu.lcd_enabled &&
+                               (((mode == 0) && (stat & 0x08) != 0) ||
+                                ((mode == 1) && (stat & 0x10) != 0) ||
+                                ((mode == 2) && (stat & 0x20) != 0) ||
+                                ((stat & 0x44) == 0x44));
+        if (stat_line && !ppu.stat_interrupt_line)
+        {
+            cpu.memory[0xFF0F] |= 0x02;
+        }
+        ppu.stat_interrupt_line = stat_line;
     }
 
     std::uint8_t read_tile_pixel(const CPU_LR35902 &cpu, std::uint8_t lcdc,
@@ -270,6 +281,10 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         ppu.cycles_into_line = 0;
         cpu.memory[LY] = 0;
         update_status(cpu, ppu, 2);
+    }
+    else
+    {
+        update_status(cpu, ppu, ppu.mode);
     }
 
     while (cycles > 0)

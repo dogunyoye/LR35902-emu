@@ -133,10 +133,67 @@ static void test_ppu_sprite_priority_palettes_flips_and_8x16()
     assert(hidden_ppu.framebuffer[0] == 0xFF3A5F40);
 }
 
+static void test_stat_mode_interrupt_edges()
+{
+    CPU_LR35902 cpu{};
+    PPU_LR35902 ppu{};
+    cpu.memory[0xFF40] = 0x80;
+    cpu.memory[0xFF41] = 0x20; // Mode 2 STAT interrupt enable
+
+    update_ppu(cpu, ppu, 0);
+    assert((cpu.memory[0xFF0F] & 0x02) != 0);
+
+    cpu.memory[0xFF0F] &= static_cast<std::uint8_t>(~0x02);
+    update_ppu(cpu, ppu, 4);
+    assert((cpu.memory[0xFF0F] & 0x02) == 0);
+
+    cpu.memory[0xFF41] = 0x28; // Keep mode 2 enabled and enable mode 0
+    update_ppu(cpu, ppu, 4);
+    assert((cpu.memory[0xFF0F] & 0x02) == 0);
+
+    update_ppu(cpu, ppu, 72);
+    assert((cpu.memory[0xFF41] & 0x03) == 3);
+    assert((cpu.memory[0xFF0F] & 0x02) == 0);
+
+    update_ppu(cpu, ppu, 172);
+    assert((cpu.memory[0xFF41] & 0x03) == 0);
+    assert((cpu.memory[0xFF0F] & 0x02) != 0);
+}
+
+static void test_stat_lyc_interrupt_edges()
+{
+    CPU_LR35902 cpu{};
+    PPU_LR35902 ppu{};
+    cpu.memory[0xFF40] = 0x80;
+    cpu.memory[0xFF41] = 0x40; // LYC coincidence STAT interrupt enable
+    cpu.memory[0xFF45] = 1;
+
+    update_ppu(cpu, ppu, 456);
+    assert(cpu.memory[0xFF44] == 1);
+    assert((cpu.memory[0xFF41] & 0x04) != 0);
+    assert((cpu.memory[0xFF0F] & 0x02) != 0);
+
+    cpu.memory[0xFF0F] &= static_cast<std::uint8_t>(~0x02);
+    update_ppu(cpu, ppu, 4);
+    assert((cpu.memory[0xFF0F] & 0x02) == 0);
+
+    cpu.memory[0xFF45] = 2;
+    update_ppu(cpu, ppu, 4);
+    assert((cpu.memory[0xFF41] & 0x04) == 0);
+    assert((cpu.memory[0xFF0F] & 0x02) == 0);
+
+    cpu.memory[0xFF45] = 1;
+    update_ppu(cpu, ppu, 4);
+    assert((cpu.memory[0xFF41] & 0x04) != 0);
+    assert((cpu.memory[0xFF0F] & 0x02) != 0);
+}
+
 int main()
 {
     test_ppu_modes_scanlines_and_background();
     test_ppu_window_composition();
     test_ppu_sprite_priority_palettes_flips_and_8x16();
+    test_stat_mode_interrupt_edges();
+    test_stat_lyc_interrupt_edges();
     return 0;
 }
