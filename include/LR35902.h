@@ -25,6 +25,11 @@ struct CPU_LR35902
     bool halted;
     bool ime; // Interrupt Master Enable flag
 
+    // Memory routing state.
+    bool cart_ram_enabled = false;
+    bool vram_locked = false;
+    bool oam_locked = false;
+
     // 64KB Flat Address Space (will be replaced later with custom read/write routers)
     std::array<uint8_t, 65536> memory;
 };
