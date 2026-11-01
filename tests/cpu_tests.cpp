@@ -516,6 +516,45 @@ static void test_interrupt_dispatch_and_priority()
     assert(!cpu.ime);
 }
 
+static void test_interrupt_dispatch_ie_stack_write_timing()
+{
+    CPU_LR35902 cancelled_cpu{};
+    cancelled_cpu.pc = 0x2345;
+    cancelled_cpu.sp = 0x0000;
+    cancelled_cpu.ime = true;
+    cancelled_cpu.memory[0xFFFF] = 0x04; // Timer interrupt enabled
+    cancelled_cpu.memory[0xFF0F] = 0x04;
+    assert(step_cpu(cancelled_cpu) == 20);
+    assert(cancelled_cpu.pc == 0x0000);
+    assert(cancelled_cpu.sp == 0xFFFE);
+    assert(cancelled_cpu.memory[0xFFFE] == 0x45);
+    assert(cancelled_cpu.memory[0xFFFF] == 0x23);
+    assert(cancelled_cpu.memory[0xFF0F] == 0x04);
+    assert(!cancelled_cpu.ime);
+
+    CPU_LR35902 reselected_cpu{};
+    reselected_cpu.pc = 0x1234;
+    reselected_cpu.sp = 0x0000;
+    reselected_cpu.ime = true;
+    reselected_cpu.memory[0xFFFF] = 0x03; // VBlank and STAT enabled
+    reselected_cpu.memory[0xFF0F] = 0x03;
+    assert(step_cpu(reselected_cpu) == 20);
+    assert(reselected_cpu.pc == 0x0048); // High-byte IE write leaves STAT pending
+    assert(reselected_cpu.memory[0xFF0F] == 0x01);
+
+    CPU_LR35902 late_write_cpu{};
+    late_write_cpu.pc = 0x0235;
+    late_write_cpu.sp = 0x0001;
+    late_write_cpu.ime = true;
+    late_write_cpu.memory[0xFFFF] = 0x08; // Serial interrupt enabled
+    late_write_cpu.memory[0xFF0F] = 0x08;
+    assert(step_cpu(late_write_cpu) == 20);
+    assert(late_write_cpu.pc == 0x0058); // Low-byte IE write is too late to cancel
+    assert(late_write_cpu.sp == 0xFFFF);
+    assert(late_write_cpu.memory[0xFFFF] == 0x35);
+    assert(late_write_cpu.memory[0xFF0F] == 0x00);
+}
+
 static void test_ei_delay_before_interrupt_dispatch()
 {
     CPU_LR35902 cpu{};
@@ -629,6 +668,7 @@ int main()
     test_missing_arithmetic_and_load_opcodes();
     test_ei_is_delayed_until_after_next_instruction();
     test_interrupt_dispatch_and_priority();
+    test_interrupt_dispatch_ie_stack_write_timing();
     test_ei_delay_before_interrupt_dispatch();
     test_halt_idle_wake_and_bug();
     test_stop_consumes_padding_byte();

@@ -391,6 +391,23 @@ namespace
         set_c_flag(cpu, total > 0xFFFFu);
     }
 
+    void advance_oam_dma_to_instruction_cycle(CPU_LR35902 &cpu, int cycle)
+    {
+        if (cpu.cpu_instruction_active && cpu.cpu_instruction_dma_cycles < cycle)
+        {
+            advance_oam_dma_for_cpu_instruction(cpu, cycle - cpu.cpu_instruction_dma_cycles);
+        }
+    }
+
+    uint16_t read_immediate16_with_dma_timing(CPU_LR35902 &cpu)
+    {
+        advance_oam_dma_to_instruction_cycle(cpu, 8);
+        const uint8_t low = cpu_read(cpu, cpu.pc);
+        advance_oam_dma_to_instruction_cycle(cpu, 12);
+        const uint8_t high = cpu_read(cpu, static_cast<uint16_t>(cpu.pc + 1));
+        return static_cast<uint16_t>(low | (high << 8));
+    }
+
     uint16_t add_sp_offset(CPU_LR35902 &cpu, uint8_t offset)
     {
         const uint16_t old_sp = cpu.sp;
@@ -413,15 +430,34 @@ uint16_t cpu_read16(CPU_LR35902 &cpu, uint16_t address)
 // Push a 16-bit value onto the stack (SP decrements by 2)
 void cpu_push16(CPU_LR35902 &cpu, uint16_t val)
 {
-    cpu.sp -= 2;
-    cpu_write(cpu, cpu.sp, val & 0xFF);
-    cpu_write(cpu, cpu.sp + 1, (val >> 8) & 0xFF);
+    if (cpu.cpu_instruction_active)
+    {
+        advance_oam_dma_for_cpu_instruction(cpu, cpu.oam_dma_push_prewrite_cycles);
+    }
+    --cpu.sp;
+    cpu_write(cpu, cpu.sp, static_cast<uint8_t>(val >> 8));
+    if (cpu.cpu_instruction_active)
+    {
+        advance_oam_dma_for_cpu_instruction(cpu, 4);
+    }
+    --cpu.sp;
+    cpu_write(cpu, cpu.sp, static_cast<uint8_t>(val));
 }
 
 // Pop a 16-bit value off the stack (SP increments by 2)
 uint16_t cpu_pop16(CPU_LR35902 &cpu)
 {
+    if (cpu.cpu_instruction_active)
+    {
+        advance_oam_dma_for_cpu_instruction(cpu, cpu.oam_dma_pop_preread_cycles);
+        advance_timers_for_cpu_instruction(cpu, cpu.oam_dma_pop_preread_cycles);
+    }
     uint8_t low = cpu_read(cpu, cpu.sp);
+    if (cpu.cpu_instruction_active)
+    {
+        advance_oam_dma_for_cpu_instruction(cpu, 4);
+        advance_timers_for_cpu_instruction(cpu, 4);
+    }
     uint8_t high = cpu_read(cpu, cpu.sp + 1);
     cpu.sp += 2;
     return static_cast<uint16_t>((high << 8) | low);
@@ -1061,27 +1097,27 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
 
     case 0xC2: // JP NZ, a16
+    {
+        const uint16_t target = read_immediate16_with_dma_timing(cpu);
+        cpu.pc += 2;
         if (!get_flag(cpu, FLAG_Z))
         {
-            cpu.pc = cpu_read16(cpu, cpu.pc);
+            cpu.pc = target;
             cycles = 16;
         }
-        else
-        {
-            cpu.pc += 2;
-            cycles = 12;
-        }
+        else cycles = 12;
         break;
+    }
 
     case 0xC3: // JP a16
-        cpu.pc = cpu_read16(cpu, cpu.pc);
+        cpu.pc = read_immediate16_with_dma_timing(cpu);
         cycles = 16;
         break;
 
     case 0xC4: // CALL NZ, a16
         if (!get_flag(cpu, FLAG_Z))
         {
-            uint16_t target = cpu_read16(cpu, cpu.pc);
+            const uint16_t target = read_immediate16_with_dma_timing(cpu);
             cpu.pc += 2;
             cpu_push16(cpu, cpu.pc);
             cpu.pc = target;
@@ -1097,7 +1133,7 @@ int execute_instruction(CPU_LR35902 &cpu)
     case 0xCC: // CALL Z, a16
         if (get_flag(cpu, FLAG_Z))
         {
-            const uint16_t target = cpu_read16(cpu, cpu.pc);
+            const uint16_t target = read_immediate16_with_dma_timing(cpu);
             cpu.pc += 2;
             cpu_push16(cpu, cpu.pc);
             cpu.pc = target;
@@ -1132,17 +1168,17 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
 
     case 0xCA: // JP Z, a16
+    {
+        const uint16_t target = read_immediate16_with_dma_timing(cpu);
+        cpu.pc += 2;
         if (get_flag(cpu, FLAG_Z))
         {
-            cpu.pc = cpu_read16(cpu, cpu.pc);
+            cpu.pc = target;
             cycles = 16;
         }
-        else
-        {
-            cpu.pc += 2;
-            cycles = 12;
-        }
+        else cycles = 12;
         break;
+    }
 
     case 0xCB: // Prefix CB
     {
@@ -1156,7 +1192,7 @@ int execute_instruction(CPU_LR35902 &cpu)
 
     case 0xCD: // CALL a16
     {
-        uint16_t target = cpu_read16(cpu, cpu.pc);
+        const uint16_t target = read_immediate16_with_dma_timing(cpu);
         cpu.pc += 2;
         cpu_push16(cpu, cpu.pc);
         cpu.pc = target;
@@ -1190,22 +1226,18 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
 
     case 0xD2: // JP NC, a16
-        if (!get_flag(cpu, FLAG_C))
-        {
-            cpu.pc = cpu_read16(cpu, cpu.pc);
-            cycles = 16;
-        }
-        else
-        {
-            cpu.pc += 2;
-            cycles = 12;
-        }
+    {
+        const uint16_t target = read_immediate16_with_dma_timing(cpu);
+        cpu.pc += 2;
+        if (!get_flag(cpu, FLAG_C)) { cpu.pc = target; cycles = 16; }
+        else cycles = 12;
         break;
+    }
 
     case 0xD4: // CALL NC, a16
         if (!get_flag(cpu, FLAG_C))
         {
-            const uint16_t target = cpu_read16(cpu, cpu.pc);
+            const uint16_t target = read_immediate16_with_dma_timing(cpu);
             cpu.pc += 2;
             cpu_push16(cpu, cpu.pc);
             cpu.pc = target;
@@ -1240,22 +1272,18 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
 
     case 0xDA: // JP C, a16
-        if (get_flag(cpu, FLAG_C))
-        {
-            cpu.pc = cpu_read16(cpu, cpu.pc);
-            cycles = 16;
-        }
-        else
-        {
-            cpu.pc += 2;
-            cycles = 12;
-        }
+    {
+        const uint16_t target = read_immediate16_with_dma_timing(cpu);
+        cpu.pc += 2;
+        if (get_flag(cpu, FLAG_C)) { cpu.pc = target; cycles = 16; }
+        else cycles = 12;
         break;
+    }
 
     case 0xDC: // CALL C, a16
         if (get_flag(cpu, FLAG_C))
         {
-            const uint16_t target = cpu_read16(cpu, cpu.pc);
+            const uint16_t target = read_immediate16_with_dma_timing(cpu);
             cpu.pc += 2;
             cpu_push16(cpu, cpu.pc);
             cpu.pc = target;
@@ -1313,6 +1341,7 @@ int execute_instruction(CPU_LR35902 &cpu)
     }
 
     case 0xE8: // ADD SP, e8
+        advance_oam_dma_to_instruction_cycle(cpu, 8);
         cpu.sp = add_sp_offset(cpu, cpu_read(cpu, cpu.pc++));
         cycles = 16;
         break;
@@ -1373,6 +1402,7 @@ int execute_instruction(CPU_LR35902 &cpu)
     }
 
     case 0xF8: // LD HL, SP+e8
+        advance_oam_dma_to_instruction_cycle(cpu, 8);
         cpu.hl.reg16 = add_sp_offset(cpu, cpu_read(cpu, cpu.pc++));
         cycles = 12;
         break;
@@ -1564,6 +1594,7 @@ int step_cpu(CPU_LR35902 &cpu)
         if (pending_interrupts == 0)
         {
             update_timers(cpu, 4);
+            update_oam_dma(cpu, 4);
             update_serial(cpu, 4);
             return 4;
         }
@@ -1572,24 +1603,123 @@ int step_cpu(CPU_LR35902 &cpu)
 
     if (cpu.ime && pending_interrupts != 0)
     {
+        cpu.ime = false;
+        cpu.ime_enable_delay = 0;
+
+        const uint16_t return_address = cpu.pc;
+        --cpu.sp;
+        cpu_write(cpu, cpu.sp, static_cast<uint8_t>(return_address >> 8));
+
+        const uint8_t pending_after_high_push = static_cast<uint8_t>(
+            cpu.memory[INTERRUPT_ENABLE] & cpu.memory[INTERRUPT_FLAGS] & 0x1F);
+        --cpu.sp;
+        cpu_write(cpu, cpu.sp, static_cast<uint8_t>(return_address));
+
+        if (pending_after_high_push == 0)
+        {
+            cpu.pc = 0x0000;
+            update_timers(cpu, 20);
+            update_oam_dma(cpu, 20);
+            update_serial(cpu, 20);
+            return 20;
+        }
+
         uint8_t interrupt_bit = 0;
-        while ((pending_interrupts & (1u << interrupt_bit)) == 0)
+        while ((pending_after_high_push & (1u << interrupt_bit)) == 0)
         {
             ++interrupt_bit;
         }
-
-        cpu.ime = false;
-        cpu.ime_enable_delay = 0;
         cpu.memory[INTERRUPT_FLAGS] &= static_cast<uint8_t>(~(1u << interrupt_bit));
-        cpu_push16(cpu, cpu.pc);
         cpu.pc = static_cast<uint16_t>(0x0040 + interrupt_bit * 8);
         update_timers(cpu, 20);
+        update_oam_dma(cpu, 20);
         update_serial(cpu, 20);
         return 20;
     }
 
+    cpu.cpu_instruction_active = true;
+    cpu.cpu_instruction_dma_cycles = 0;
+    cpu.cpu_instruction_timer_cycles = 0;
+    cpu.oam_dma_push_prewrite_cycles = 0;
+    cpu.oam_dma_pop_preread_cycles = 0;
+    if (cpu.oam_dma_active && cpu.pc >= 0xE000 && cpu.pc <= 0xFDFF)
+    {
+        advance_oam_dma_for_cpu_instruction(cpu, 4);
+    }
+    const uint8_t opcode = cpu_read(cpu, cpu.pc);
+    if (opcode == 0xCD || opcode == 0xC4 || opcode == 0xCC || opcode == 0xD4 || opcode == 0xDC)
+    {
+        cpu.oam_dma_push_prewrite_cycles = 8;
+    }
+    else if (opcode == 0xC5 || opcode == 0xD5 || opcode == 0xE5 || opcode == 0xF5 ||
+             (opcode & 0xC7) == 0xC7)
+    {
+        cpu.oam_dma_push_prewrite_cycles = 4;
+    }
+    if (opcode == 0xC1 || opcode == 0xD1 || opcode == 0xE1 || opcode == 0xF1 ||
+        opcode == 0xC9 || opcode == 0xD9)
+    {
+        cpu.oam_dma_pop_preread_cycles = 8;
+    }
+    else if (opcode == 0xC0 || opcode == 0xC8 || opcode == 0xD0 || opcode == 0xD8)
+    {
+        cpu.oam_dma_pop_preread_cycles = 12;
+    }
+
+    uint16_t timer_address = 0;
+    int timer_bus_cycle = 0;
+    if (opcode == 0xE0 || opcode == 0xF0) // LDH (a8),A / LDH A,(a8)
+    {
+        timer_address = static_cast<uint16_t>(0xFF00u + cpu_read(cpu, static_cast<uint16_t>(cpu.pc + 1)));
+        timer_bus_cycle = 8;
+    }
+    else if (opcode == 0xE2 || opcode == 0xF2)
+    {
+        timer_address = static_cast<uint16_t>(0xFF00u + cpu.bc.reg8.low);
+        timer_bus_cycle = 8;
+    }
+    else if (opcode == 0x77 || opcode == 0x7E || opcode == 0x36)
+    {
+        timer_address = cpu.hl.reg16;
+        timer_bus_cycle = opcode == 0x36 ? 12 : 8;
+    }
+    else if (opcode == 0x02 || opcode == 0x0A)
+    {
+        timer_address = cpu.bc.reg16;
+        timer_bus_cycle = 8;
+    }
+    else if (opcode == 0x12 || opcode == 0x1A)
+    {
+        timer_address = cpu.de.reg16;
+        timer_bus_cycle = 8;
+    }
+    else if (opcode == 0x22 || opcode == 0x2A || opcode == 0x32 || opcode == 0x3A)
+    {
+        timer_address = cpu.hl.reg16;
+        timer_bus_cycle = 8;
+    }
+    else if (opcode == 0xEA || opcode == 0xFA)
+    {
+        timer_address = cpu_read16(cpu, static_cast<uint16_t>(cpu.pc + 1));
+        timer_bus_cycle = 16;
+    }
+    if (timer_address >= 0xFF04 && timer_address <= 0xFF07)
+    {
+        advance_timers_for_cpu_instruction(cpu, timer_bus_cycle);
+    }
+    if (opcode == 0xE0 && cpu_read(cpu, static_cast<uint16_t>(cpu.pc + 1)) == 0x46)
+    {
+        advance_oam_dma_for_cpu_instruction(cpu, 12);
+    }
+    else if (opcode == 0x77 && cpu.hl.reg16 == 0xFF46) // LD (HL),A
+    {
+        advance_oam_dma_for_cpu_instruction(cpu, 8);
+    }
+
     const int cycles = execute_instruction(cpu);
-    update_timers(cpu, cycles);
+    cpu.cpu_instruction_active = false;
+    update_timers(cpu, cycles - cpu.cpu_instruction_timer_cycles);
+    update_oam_dma(cpu, cycles - cpu.cpu_instruction_dma_cycles);
     update_serial(cpu, cycles);
     return cycles;
 }

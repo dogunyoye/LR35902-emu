@@ -22,6 +22,16 @@ const uint16_t SC_REG = 0xFF02;
 
 namespace
 {
+    uint8_t cpu_read_unrestricted(CPU_LR35902 &cpu, uint16_t address);
+
+    bool is_unmapped_dmg_io(uint16_t address)
+    {
+        return address == 0xFF03 || (address >= 0xFF08 && address <= 0xFF0E) ||
+               address == 0xFF15 || address == 0xFF1F ||
+               (address >= 0xFF27 && address <= 0xFF29) ||
+               (address >= 0xFF4C && address <= 0xFF7F);
+    }
+
     uint8_t read_cartridge_rom(const CPU_LR35902 &cpu, uint16_t address)
     {
         const std::size_t bank_count = cpu.cartridge_rom.size() / 0x4000;
@@ -78,7 +88,9 @@ namespace
     }
 }
 
-uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
+namespace
+{
+    uint8_t cpu_read_unrestricted(CPU_LR35902 &cpu, uint16_t address)
 {
     if (address >= ECHO_START && address <= ECHO_END)
     {
@@ -109,6 +121,39 @@ uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
         return static_cast<uint8_t>(0x7E | (cpu.memory[SC_REG] & 0x81));
     }
 
+    if (address == 0xFF0F)
+    {
+        return static_cast<uint8_t>(0xE0 | (cpu.memory[address] & 0x1F));
+    }
+
+    if (address == 0xFF41)
+    {
+        return static_cast<uint8_t>(0x80 | cpu.memory[address]);
+    }
+
+    if (address == 0xFF07)
+    {
+        return static_cast<uint8_t>(0xF8 | (cpu.memory[address] & 0x07));
+    }
+
+    switch (address)
+    {
+    case 0xFF10:
+        return static_cast<uint8_t>(cpu.memory[address] | 0x80);
+    case 0xFF1A:
+        return static_cast<uint8_t>((cpu.memory[address] & 0x80) | 0x7F);
+    case 0xFF1C:
+        return static_cast<uint8_t>((cpu.memory[address] & 0x60) | 0x9F);
+    case 0xFF20:
+        return static_cast<uint8_t>((cpu.memory[address] & 0x3F) | 0xC0);
+    case 0xFF23:
+        return static_cast<uint8_t>((cpu.memory[address] & 0xC0) | 0x3F);
+    case 0xFF26:
+        return static_cast<uint8_t>((cpu.memory[address] & 0x8F) | 0x70);
+    default:
+        break;
+    }
+
     if (address >= VRAM_START && address <= VRAM_END && cpu.vram_locked)
     {
         return 0xFF;
@@ -126,9 +171,110 @@ uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
 
     return cpu.memory[address];
 }
+}
+
+uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
+{
+    if (is_unmapped_dmg_io(address))
+    {
+        return 0xFF;
+    }
+    const bool hram_access = address >= HRAM_START && address <= HRAM_END;
+    if (cpu.oam_dma_bus_blocked && !hram_access && address != 0xFF46)
+    {
+        return 0xFF;
+    }
+    return cpu_read_unrestricted(cpu, address);
+}
+
+void update_oam_dma(CPU_LR35902 &cpu, int cycles)
+{
+    if (!cpu.oam_dma_active || cycles <= 0)
+    {
+        return;
+    }
+
+    for (int cycle = 0; cycle < cycles && cpu.oam_dma_active; ++cycle)
+    {
+        if (cpu.oam_dma_startup_delay != 0)
+        {
+            --cpu.oam_dma_startup_delay;
+            if (cpu.oam_dma_startup_delay == 0)
+            {
+                cpu.oam_dma_bus_blocked = true;
+            }
+        }
+
+        if (cpu.oam_dma_first_byte_delay != 0)
+        {
+            --cpu.oam_dma_first_byte_delay;
+            if (cpu.oam_dma_first_byte_delay == 0)
+            {
+                const uint16_t source_address = static_cast<uint16_t>(
+                    (static_cast<uint16_t>(cpu.oam_dma_source) << 8) + cpu.oam_dma_index);
+                cpu.memory[OAM_START + cpu.oam_dma_index] = cpu_read_unrestricted(cpu, source_address);
+                ++cpu.oam_dma_index;
+            }
+            continue;
+        }
+
+        ++cpu.oam_dma_cycle_phase;
+        if (cpu.oam_dma_cycle_phase != 4)
+        {
+            continue;
+        }
+
+        cpu.oam_dma_cycle_phase = 0;
+        const uint16_t source_address = static_cast<uint16_t>(
+            (static_cast<uint16_t>(cpu.oam_dma_source) << 8) + cpu.oam_dma_index);
+        const uint16_t destination_address = static_cast<uint16_t>(OAM_START + cpu.oam_dma_index);
+        cpu.memory[destination_address] = cpu_read_unrestricted(cpu, source_address);
+        ++cpu.oam_dma_index;
+        if (cpu.oam_dma_index == 0xA0)
+        {
+            cpu.oam_dma_active = false;
+            cpu.oam_dma_bus_blocked = false;
+        }
+    }
+}
+
+void advance_oam_dma_for_cpu_instruction(CPU_LR35902 &cpu, int cycles)
+{
+    if (cycles <= 0)
+    {
+        return;
+    }
+    update_oam_dma(cpu, cycles);
+    if (cpu.cpu_instruction_active)
+    {
+        cpu.cpu_instruction_dma_cycles += cycles;
+    }
+}
 
 void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
 {
+    if (is_unmapped_dmg_io(address))
+    {
+        return;
+    }
+    if (cpu.oam_dma_bus_blocked && address != 0xFF46 && !(address >= HRAM_START && address <= HRAM_END))
+    {
+        return;
+    }
+
+    if (address == 0xFF46)
+    {
+        cpu.memory[address] = value;
+        cpu.oam_dma_source = value;
+        cpu.oam_dma_index = 0;
+        cpu.oam_dma_cycle_phase = 0;
+        cpu.oam_dma_active = true;
+        cpu.oam_dma_bus_blocked = false;
+        cpu.oam_dma_startup_delay = 4;
+        cpu.oam_dma_first_byte_delay = 4;
+        return;
+    }
+
     if (address == JOYP_REG)
     {
         const uint8_t old_lines = joypad_lines(cpu);
@@ -150,10 +296,51 @@ void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
         return;
     }
 
+    if (address == 0xFF0F)
+    {
+        cpu.memory[address] = value & 0x1F;
+        return;
+    }
+
+    if (address == 0xFF41)
+    {
+        cpu.memory[address] = static_cast<uint8_t>((cpu.memory[address] & 0x07) | (value & 0x78));
+        return;
+    }
+
     if (address == 0xFF04)
     {
-        cpu.memory[address] = 0;
-        cpu.div_cycle_accumulator = 0;
+        reset_divider(cpu);
+        return;
+    }
+
+    if (address == 0xFF05)
+    {
+        if (cpu.tima_reload_delay == 1 || cpu.tima_reloaded_this_cycle)
+        {
+            return;
+        }
+        if (cpu.tima_reload_delay > 1)
+        {
+            cpu.tima_reload_delay = 0;
+        }
+        cpu.memory[address] = value;
+        return;
+    }
+
+    if (address == 0xFF06)
+    {
+        cpu.memory[address] = value;
+        if (cpu.tima_reloaded_this_cycle)
+        {
+            cpu.memory[0xFF05] = value;
+        }
+        return;
+    }
+
+    if (address == 0xFF07)
+    {
+        write_timer_control(cpu, value);
         return;
     }
 

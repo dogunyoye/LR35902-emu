@@ -19,8 +19,49 @@ static void test_unusable_oam_region()
     assert(cpu.memory[0xFEFF] == 0xBB);
 }
 
+static void test_interrupt_flags_unused_bits()
+{
+    CPU_LR35902 cpu{};
+    cpu_write(cpu, 0xFF0F, 0x08);
+    assert(cpu.memory[0xFF0F] == 0x08);
+    assert(cpu_read(cpu, 0xFF0F) == 0xE8);
+}
+
+static void test_oam_dma_transfer_and_bus_lock()
+{
+    CPU_LR35902 cpu{};
+    for (std::uint16_t index = 0; index < 0xA0; ++index)
+    {
+        cpu.memory[0xC000 + index] = static_cast<std::uint8_t>(index ^ 0x5A);
+    }
+
+    cpu_write(cpu, 0xFF46, 0xC0);
+    assert(cpu.oam_dma_active);
+    assert(cpu_read(cpu, 0xC000) == 0x5A);
+    update_oam_dma(cpu, 3);
+    assert(cpu.memory[0xFE00] == 0);
+    assert(cpu_read(cpu, 0xC000) == 0x5A);
+
+    update_oam_dma(cpu, 1);
+    assert(cpu.memory[0xFE00] == 0x5A);
+    assert(cpu_read(cpu, 0xC000) == 0xFF);
+    assert(cpu_read(cpu, 0xFF80) == 0);
+
+    update_oam_dma(cpu, 636);
+    assert(!cpu.oam_dma_active);
+    assert(cpu.oam_dma_index == 0xA0);
+    assert(!cpu.oam_dma_bus_blocked);
+    for (std::uint16_t index = 0; index < 0xA0; ++index)
+    {
+        assert(cpu.memory[0xFE00 + index] == static_cast<std::uint8_t>(index ^ 0x5A));
+    }
+    assert(cpu_read(cpu, 0xC000) == 0x5A);
+}
+
 int main()
 {
     test_unusable_oam_region();
+    test_interrupt_flags_unused_bits();
+    test_oam_dma_transfer_and_bus_lock();
     return 0;
 }
