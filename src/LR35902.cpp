@@ -1443,6 +1443,20 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
     }
 
+    case 0x30: // JR NC, e8
+        if (!get_flag(cpu, FLAG_C))
+        {
+            const int8_t offset = static_cast<int8_t>(cpu_read(cpu, cpu.pc++));
+            cpu.pc = static_cast<uint16_t>(cpu.pc + offset);
+            cycles = 12;
+        }
+        else
+        {
+            cpu.pc++;
+            cycles = 8;
+        }
+        break;
+
     case 0x38: // JR C, e8
     {
         int8_t offset = static_cast<int8_t>(cpu_read(cpu, cpu.pc++));

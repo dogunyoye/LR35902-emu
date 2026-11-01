@@ -289,6 +289,22 @@ static void test_control_flow_cycle_counts()
     assert(cpu.pc == 0x000A);
 }
 
+static void test_jr_nc_taken_and_not_taken()
+{
+    CPU_LR35902 taken_cpu{};
+    taken_cpu.memory[0] = 0x30; // JR NC, e8
+    taken_cpu.memory[1] = 0x02;
+    assert(execute_instruction(taken_cpu) == 12);
+    assert(taken_cpu.pc == 4);
+
+    CPU_LR35902 not_taken_cpu{};
+    set_flag(not_taken_cpu, FLAG_C, true);
+    not_taken_cpu.memory[0] = 0x30; // JR NC, e8
+    not_taken_cpu.memory[1] = 0x02;
+    assert(execute_instruction(not_taken_cpu) == 8);
+    assert(not_taken_cpu.pc == 2);
+}
+
 static void test_cb_rotate_shift_opcodes()
 {
     struct RotateCase
@@ -566,6 +582,7 @@ int main()
     test_cb_prefixed_bit_and_rotate();
     test_instruction_cycle_counts();
     test_control_flow_cycle_counts();
+    test_jr_nc_taken_and_not_taken();
     test_cb_rotate_shift_opcodes();
     test_missing_control_flow_opcodes();
     test_missing_arithmetic_and_load_opcodes();

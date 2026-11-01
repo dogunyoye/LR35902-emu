@@ -13,7 +13,7 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | WRAM echo (0xE000–0xFDFF) | :white_check_mark: done |
 | ROM-only and MBC1 cartridges (banked ROM and RAM) | :white_check_mark: done |
 | VRAM/OAM access locking during PPU modes | :white_check_mark: done |
-| Legal base and CB-prefixed opcode implementations | :white_check_mark: done |
+| Legal base and CB-prefixed opcode coverage | :warning: partial (STOP not implemented) |
 | Timer registers (DIV/TIMA/TMA/TAC) and update logic | :white_check_mark: done |
 | Interrupt dispatch, priority, delayed EI, and HALT wake-up | :white_check_mark: done |
 | JOYP register, keyboard input, and joypad interrupt | :white_check_mark: done |
