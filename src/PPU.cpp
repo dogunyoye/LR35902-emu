@@ -112,8 +112,9 @@ namespace
         if ((lcdc & 0x02) != 0)
         {
             const int sprite_height = (lcdc & 0x04) != 0 ? 16 : 8;
-            std::size_t selected_sprites = 0;
-            for (std::uint8_t index = 0; index < 40 && selected_sprites < 10; ++index)
+            std::array<std::uint8_t, 10> selected_sprites{};
+            std::size_t selected_count = 0;
+            for (std::uint8_t index = 0; index < 40 && selected_count < selected_sprites.size(); ++index)
             {
                 const std::uint16_t address = static_cast<std::uint16_t>(OAM_START + index * 4);
                 const int top = static_cast<int>(cpu.memory[address]) - 16;
@@ -122,16 +123,36 @@ namespace
                     continue;
                 }
 
-                ++selected_sprites;
-                const int sprite_x = cpu.memory[address + 1];
-                if (sprite_x == 0 || sprite_x >= 168)
+                selected_sprites[selected_count++] = cpu.memory[address + 1];
+            }
+
+            std::sort(selected_sprites.begin(), selected_sprites.begin() + selected_count);
+            std::array<bool, 32> fetched_background_tiles{};
+            for (std::size_t index = 0; index < selected_count; ++index)
+            {
+                const int sprite_x = selected_sprites[index];
+                if (sprite_x >= 168)
                 {
                     continue;
                 }
 
-                const int screen_x = sprite_x - 8;
-                const int alignment = (screen_x + (cpu.memory[SCX] & 0x07)) & 0x07;
-                duration += 11 - std::min(alignment, 5);
+                if (sprite_x == 0)
+                {
+                    duration += 11;
+                    continue;
+                }
+
+                const int world_x = sprite_x - 8 + cpu.memory[SCX];
+                const int alignment = world_x & 0x07;
+                const std::size_t tile = static_cast<std::size_t>((world_x / 8) & 0x1F);
+                if (fetched_background_tiles[tile])
+                {
+                    duration += 6;
+                    continue;
+                }
+
+                fetched_background_tiles[tile] = true;
+                duration += 6 + std::max(0, 5 - alignment);
             }
         }
 

@@ -73,6 +73,15 @@ struct CPU_LR35902
     std::array<uint8_t, 65536> memory;
 };
 
+enum class GameBoyModel : uint8_t
+{
+    Dmg0,
+    DmgABC,
+    Mgb,
+    Sgb,
+    Sgb2
+};
+
 enum class JoypadButton : uint8_t
 {
     Right = 0,
@@ -124,7 +133,9 @@ void advance_oam_dma_for_cpu_instruction(CPU_LR35902 &cpu, int cycles);
 void reset_divider(CPU_LR35902 &cpu);
 void write_timer_control(CPU_LR35902 &cpu, uint8_t value);
 void update_serial(CPU_LR35902 &cpu, int cycles);
-bool load_rom_only_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error);
-bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error);
+bool load_rom_only_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error,
+                             GameBoyModel model = GameBoyModel::DmgABC);
+bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error,
+                    GameBoyModel model = GameBoyModel::DmgABC);
 bool load_cartridge_ram(CPU_LR35902 &cpu, const std::filesystem::path &path, std::string &error);
 bool save_cartridge_ram(const CPU_LR35902 &cpu, const std::filesystem::path &path, std::string &error);

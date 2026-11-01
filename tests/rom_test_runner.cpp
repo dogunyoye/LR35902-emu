@@ -17,7 +17,7 @@ namespace
 
     void print_usage(const char *program_name)
     {
-        std::cerr << "Usage: " << program_name << " ROM_PATH [MAX_CYCLES]\n"
+        std::cerr << "Usage: " << program_name << " ROM_PATH [MAX_CYCLES] [dmg0|dmgABC|mgb|sgb|sgb2]\n"
                   << "Runs a serial-reporting ROM test. Exit status: 0=Passed, 1=Failed, 2=no result.\n";
     }
 
@@ -26,6 +26,36 @@ namespace
         const std::string value(text);
         const auto result = std::from_chars(value.data(), value.data() + value.size(), cycle_limit);
         return result.ec == std::errc{} && result.ptr == value.data() + value.size() && cycle_limit > 0;
+    }
+
+    bool parse_model(const char *text, GameBoyModel &model)
+    {
+        const std::string value(text);
+        if (value == "dmg0")
+        {
+            model = GameBoyModel::Dmg0;
+        }
+        else if (value == "dmgABC")
+        {
+            model = GameBoyModel::DmgABC;
+        }
+        else if (value == "mgb")
+        {
+            model = GameBoyModel::Mgb;
+        }
+        else if (value == "sgb")
+        {
+            model = GameBoyModel::Sgb;
+        }
+        else if (value == "sgb2")
+        {
+            model = GameBoyModel::Sgb2;
+        }
+        else
+        {
+            return false;
+        }
+        return true;
     }
 
     int ppu_write_cycle(CPU_LR35902 &cpu, std::uint8_t opcode)
@@ -105,10 +135,11 @@ namespace
         std::uint16_t address = 0;
         int access_cycle = 0;
         const int ly_read_cycle = ppu.startup_first_line && !ppu.startup_first_enable ? 12 : 8;
+        const int stat_read_cycle = ppu.startup_first_line && !ppu.startup_first_enable ? 8 : 4;
         if ((opcode >= 0x40 && opcode <= 0x7F) && opcode != 0x76 && (opcode & 0x07) == 0x06)
         {
             address = cpu.hl.reg16;
-            access_cycle = address == 0xFF44 ? ly_read_cycle : 4;
+            access_cycle = address == 0xFF44 ? ly_read_cycle : (address == 0xFF41 ? stat_read_cycle : 4);
         }
         else
         {
@@ -116,16 +147,16 @@ namespace
             {
             case 0x0A:
                 address = cpu.bc.reg16;
-                access_cycle = address == 0xFF44 ? ly_read_cycle : 4;
+                access_cycle = address == 0xFF44 ? ly_read_cycle : (address == 0xFF41 ? stat_read_cycle : 4);
                 break;
             case 0x1A:
                 address = cpu.de.reg16;
-                access_cycle = address == 0xFF44 ? ly_read_cycle : 4;
+                access_cycle = address == 0xFF44 ? ly_read_cycle : (address == 0xFF41 ? stat_read_cycle : 4);
                 break;
             case 0x2A:
             case 0x3A:
                 address = cpu.hl.reg16;
-                access_cycle = address == 0xFF44 ? ly_read_cycle : 4;
+                access_cycle = address == 0xFF44 ? ly_read_cycle : (address == 0xFF41 ? stat_read_cycle : 4);
                 break;
             case 0xF0:
                 address = static_cast<std::uint16_t>(0xFF00u + cpu_read(cpu, static_cast<std::uint16_t>(cpu.pc + 1)));
@@ -205,16 +236,26 @@ namespace
 
 int main(int argc, char **argv)
 {
-    if (argc < 2 || argc > 3)
+    if (argc < 2 || argc > 4)
     {
         print_usage(argv[0]);
         return 2;
     }
 
     std::uint64_t cycle_limit = DEFAULT_MAX_CYCLES;
-    if (argc == 3 && !parse_cycle_limit(argv[2], cycle_limit))
+    GameBoyModel model = GameBoyModel::DmgABC;
+    if (argc >= 3 && !parse_cycle_limit(argv[2], cycle_limit))
     {
-        std::cerr << "Invalid cycle limit.\n";
+        if (argc != 3 || !parse_model(argv[2], model))
+        {
+            std::cerr << "Invalid cycle limit or model.\n";
+            print_usage(argv[0]);
+            return 2;
+        }
+    }
+    if (argc == 4 && !parse_model(argv[3], model))
+    {
+        std::cerr << "Invalid model.\n";
         print_usage(argv[0]);
         return 2;
     }
@@ -230,7 +271,7 @@ int main(int argc, char **argv)
     std::vector<std::uint8_t> rom((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     CPU_LR35902 cpu{};
     std::string error;
-    if (!load_cartridge(cpu, std::move(rom), error))
+    if (!load_cartridge(cpu, std::move(rom), error, model))
     {
         std::cerr << "Unable to load ROM: " << error << '\n';
         return 2;
@@ -238,6 +279,15 @@ int main(int argc, char **argv)
 
     std::uint64_t cycles_run = 0;
     PPU_LR35902 ppu{};
+    if (model == GameBoyModel::Dmg0)
+    {
+        cpu.memory[0xFF41] = 0x81;
+        cpu.memory[0xFF44] = 0x91;
+        ppu.lcd_enabled = true;
+        ppu.has_started = true;
+        ppu.mode = 1;
+        ppu.cycles_into_line = 108;
+    }
     std::size_t output_written = 0;
     while (cycles_run < cycle_limit && !cpu.stopped)
     {
