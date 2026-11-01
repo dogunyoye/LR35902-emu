@@ -11,7 +11,7 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | CPU register model (AF/BC/DE/HL, SP, PC, IME) | :white_check_mark: done |
 | 64 KB flat memory space + read/write routing | :white_check_mark: done |
 | WRAM echo (0xE000–0xFDFF) | :white_check_mark: done |
-| ROM-only and MBC1 cartridges (banked ROM and RAM) | :white_check_mark: done |
+| ROM-only and MBC1 cartridges (banked ROM/RAM, battery saves) | :white_check_mark: done |
 | VRAM/OAM access locking during PPU modes | :white_check_mark: done |
 | Legal base and CB-prefixed opcode coverage, including STOP | :white_check_mark: done |
 | Timer registers (DIV/TIMA/TMA/TAC) and update logic | :white_check_mark: done |
@@ -69,6 +69,8 @@ Run a supported ROM-only (32 KiB) or MBC1 cartridge image:
 ./build/lr35902-emu /path/to/game.gb
 ```
 
+MBC1 battery-backed RAM is loaded from and saved to a same-basename `.sav` file beside the ROM.
+
 Controls: arrow keys move, Z is A, X is B, Right Shift is Select, and Enter is Start.
 
 Show usage/help:
@@ -88,14 +90,14 @@ Show usage/help:
 ├── src/
 │   ├── LR35902.cpp      # Instruction decoder, flags, interrupt stepping
 │   ├── Memory.cpp       # Memory routing and access rules
-│   ├── Cartridge.cpp    # ROM-only/MBC1 validation, setup, and bank state
+│   ├── Cartridge.cpp    # ROM-only/MBC1 validation, banking, and save RAM
 │   ├── PPU.cpp          # LCD modes, scanlines, and BG/window/sprite composition
 │   ├── Timer.cpp        # Divider/timer register updates
 │   └── main.cpp         # CLI entry point and demo runner
 ├── tests/
 │   ├── cpu_tests.cpp        # CPU instructions, flags, and interrupts
 │   ├── timer_tests.cpp      # Timer register behavior
-│   ├── cartridge_tests.cpp  # ROM-only/MBC1 loading, bank, and RAM behavior
+│   ├── cartridge_tests.cpp  # ROM-only/MBC1 loading, banking, and save persistence
 │   ├── memory_tests.cpp     # Memory-bus address behavior
 │   ├── joypad_tests.cpp     # JOYP selection and interrupt behavior
 │   └── ppu_tests.cpp        # PPU modes, scanlines, window, and sprites

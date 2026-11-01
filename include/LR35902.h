@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -36,6 +37,7 @@ struct CPU_LR35902
     // Memory routing state.
     bool cart_ram_enabled = false;
     bool cartridge_mbc1 = false;
+    bool cartridge_battery_backed = false;
     uint8_t mbc1_rom_bank_low = 1;
     uint8_t mbc1_bank_high = 0;
     uint8_t mbc1_banking_mode = 0;
@@ -95,3 +97,5 @@ uint16_t cpu_pop16(CPU_LR35902 &cpu);
 void update_timers(CPU_LR35902 &cpu, int cycles);
 bool load_rom_only_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error);
 bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error);
+bool load_cartridge_ram(CPU_LR35902 &cpu, const std::filesystem::path &path, std::string &error);
+bool save_cartridge_ram(const CPU_LR35902 &cpu, const std::filesystem::path &path, std::string &error);

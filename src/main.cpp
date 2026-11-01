@@ -175,6 +175,7 @@ int main(int argc, char **argv)
     }
 
     CPU_LR35902 cpu{};
+    std::filesystem::path save_path;
 
     if (argc == 2)
     {
@@ -185,6 +186,17 @@ int main(int argc, char **argv)
             std::cerr << "Unable to load ROM: " << rom_path << " (" << rom_error << ")\n\n";
             print_usage(argv[0]);
             return 1;
+        }
+
+        if (cpu.cartridge_battery_backed)
+        {
+            save_path = rom_path;
+            save_path.replace_extension(".sav");
+            if (!load_cartridge_ram(cpu, save_path, rom_error))
+            {
+                std::cerr << "Unable to load cartridge save: " << rom_error << std::endl;
+                return 1;
+            }
         }
     }
     else
@@ -312,6 +324,16 @@ int main(int argc, char **argv)
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
+
+    if (!save_path.empty())
+    {
+        std::string save_error;
+        if (!save_cartridge_ram(cpu, save_path, save_error))
+        {
+            std::cerr << "Unable to save cartridge RAM: " << save_error << std::endl;
+            return 1;
+        }
+    }
 
     std::cout << "Final CPU state:\n";
     print_cpu_state(cpu);

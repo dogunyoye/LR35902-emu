@@ -3,6 +3,15 @@
 #include <cassert>
 #include <utility>
 
+static std::vector<uint8_t> make_mbc1_ram_rom(uint8_t cartridge_type)
+{
+    std::vector<uint8_t> rom(0x8000, 0);
+    rom[0x0147] = cartridge_type;
+    rom[0x0148] = 0x00; // 2 ROM banks
+    rom[0x0149] = 0x02; // 8 KiB RAM
+    return rom;
+}
+
 static void test_rom_only_cartridge()
 {
     CPU_LR35902 cpu{};
@@ -115,10 +124,51 @@ static void test_mbc1_ram_banking_and_enable()
     assert(cpu_read(cpu, 0xA000) == 0x34);
 }
 
+static void test_battery_ram_persistence()
+{
+    const std::filesystem::path save_path =
+        std::filesystem::temp_directory_path() / "lr35902-battery-ram-test.sav";
+    const std::filesystem::path volatile_save_path =
+        std::filesystem::temp_directory_path() / "lr35902-volatile-ram-test.sav";
+    std::error_code filesystem_error;
+    std::filesystem::remove(save_path, filesystem_error);
+    std::filesystem::remove(volatile_save_path, filesystem_error);
+
+    std::string error;
+    CPU_LR35902 first_run{};
+    assert(load_cartridge(first_run, make_mbc1_ram_rom(0x03), error));
+    assert(first_run.cartridge_battery_backed);
+    assert(load_cartridge_ram(first_run, save_path, error));
+    assert(first_run.cartridge_ram[0] == 0xFF);
+
+    cpu_write(first_run, 0x0000, 0x0A);
+    cpu_write(first_run, 0xA000, 0x42);
+    cpu_write(first_run, 0xA123, 0x9A);
+    assert(save_cartridge_ram(first_run, save_path, error));
+
+    CPU_LR35902 second_run{};
+    assert(load_cartridge(second_run, make_mbc1_ram_rom(0x03), error));
+    assert(load_cartridge_ram(second_run, save_path, error));
+    cpu_write(second_run, 0x0000, 0x0A);
+    assert(cpu_read(second_run, 0xA000) == 0x42);
+    assert(cpu_read(second_run, 0xA123) == 0x9A);
+
+    CPU_LR35902 volatile_ram{};
+    assert(load_cartridge(volatile_ram, make_mbc1_ram_rom(0x02), error));
+    assert(!volatile_ram.cartridge_battery_backed);
+    cpu_write(volatile_ram, 0x0000, 0x0A);
+    cpu_write(volatile_ram, 0xA000, 0x55);
+    assert(save_cartridge_ram(volatile_ram, volatile_save_path, error));
+    assert(!std::filesystem::exists(volatile_save_path));
+
+    std::filesystem::remove(save_path, filesystem_error);
+}
+
 int main()
 {
     test_rom_only_cartridge();
     test_mbc1_rom_banking();
     test_mbc1_ram_banking_and_enable();
+    test_battery_ram_persistence();
     return 0;
 }

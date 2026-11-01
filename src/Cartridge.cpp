@@ -1,5 +1,7 @@
 #include "LR35902.h"
 
+#include <fstream>
+#include <iterator>
 #include <utility>
 
 namespace
@@ -98,6 +100,7 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     cpu = CPU_LR35902{};
     cpu.cartridge_rom = std::move(rom);
     cpu.cartridge_mbc1 = mbc1;
+    cpu.cartridge_battery_backed = cartridge_type == 0x03;
     cpu.cartridge_ram.assign(ram_size, 0xFF);
     cpu.af.reg16 = 0x01B0;
     cpu.bc.reg16 = 0x0013;
@@ -122,4 +125,65 @@ bool load_rom_only_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::st
         return false;
     }
     return load_cartridge(cpu, std::move(rom), error);
+}
+
+bool load_cartridge_ram(CPU_LR35902 &cpu, const std::filesystem::path &path, std::string &error)
+{
+    if (!cpu.cartridge_battery_backed || cpu.cartridge_ram.empty())
+    {
+        error.clear();
+        return true;
+    }
+
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+    {
+        std::error_code filesystem_error;
+        if (!std::filesystem::exists(path, filesystem_error) && !filesystem_error)
+        {
+            error.clear();
+            return true;
+        }
+        error = "Unable to open cartridge save: " + path.string();
+        return false;
+    }
+
+    std::vector<uint8_t> save_data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    if (save_data.size() != cpu.cartridge_ram.size())
+    {
+        error = "Cartridge save size does not match the RAM size in the ROM header.";
+        return false;
+    }
+
+    cpu.cartridge_ram = std::move(save_data);
+    error.clear();
+    return true;
+}
+
+bool save_cartridge_ram(const CPU_LR35902 &cpu, const std::filesystem::path &path, std::string &error)
+{
+    if (!cpu.cartridge_battery_backed || cpu.cartridge_ram.empty())
+    {
+        error.clear();
+        return true;
+    }
+
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file)
+    {
+        error = "Unable to create cartridge save: " + path.string();
+        return false;
+    }
+
+    file.write(reinterpret_cast<const char *>(cpu.cartridge_ram.data()),
+               static_cast<std::streamsize>(cpu.cartridge_ram.size()));
+    file.close();
+    if (!file)
+    {
+        error = "Unable to write cartridge save: " + path.string();
+        return false;
+    }
+
+    error.clear();
+    return true;
 }
