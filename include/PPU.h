@@ -17,6 +17,9 @@ struct PPU_LR35902
     int mode3_duration = 172;
     std::uint8_t mode = 0;
     bool lcd_enabled = false;
+    bool has_started = false;
+    bool startup_mode0 = false;
+    bool startup_first_line = false;
     bool framebuffer_initialized = false;
     bool stat_interrupt_line = false;
 };

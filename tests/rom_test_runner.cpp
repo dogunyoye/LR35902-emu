@@ -1,6 +1,7 @@
 #include "LR35902.h"
 #include "PPU.h"
 
+#include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <filesystem>
@@ -39,19 +40,19 @@ namespace
             break;
         case 0xEA:
             address = cpu_read16(cpu, static_cast<std::uint16_t>(cpu.pc + 1));
-            access_cycle = 16;
+            access_cycle = 12;
             break;
         case 0xE2:
             address = static_cast<std::uint16_t>(0xFF00u + cpu.bc.reg8.low);
-            access_cycle = 8;
+            access_cycle = address == 0xFF44 ? 8 : 4;
             break;
         case 0x77:
             address = cpu.hl.reg16;
-            access_cycle = 8;
+            access_cycle = 4;
             break;
         case 0x36:
             address = cpu.hl.reg16;
-            access_cycle = 12;
+            access_cycle = 8;
             break;
         case 0xCB:
         {
@@ -60,7 +61,7 @@ namespace
             if ((cb_opcode & 0x07) == 6 && operation >= 2)
             {
                 address = cpu.hl.reg16;
-                access_cycle = 16;
+                access_cycle = 12;
             }
             break;
         }
@@ -69,6 +70,65 @@ namespace
         }
 
         return address >= 0xFF40 && address <= 0xFF4B ? access_cycle : 0;
+    }
+
+    int ppu_read_cycle(CPU_LR35902 &cpu, std::uint8_t opcode)
+    {
+        std::uint16_t address = 0;
+        int access_cycle = 0;
+        if ((opcode >= 0x40 && opcode <= 0x7F) && opcode != 0x76 && (opcode & 0x07) == 0x06)
+        {
+            address = cpu.hl.reg16;
+            access_cycle = address == 0xFF44 ? 8 : 4;
+        }
+        else
+        {
+            switch (opcode)
+            {
+            case 0x0A:
+                address = cpu.bc.reg16;
+                access_cycle = address == 0xFF44 ? 8 : 4;
+                break;
+            case 0x1A:
+                address = cpu.de.reg16;
+                access_cycle = address == 0xFF44 ? 8 : 4;
+                break;
+            case 0x2A:
+            case 0x3A:
+                address = cpu.hl.reg16;
+                access_cycle = address == 0xFF44 ? 8 : 4;
+                break;
+            case 0xF0:
+                address = static_cast<std::uint16_t>(0xFF00u + cpu_read(cpu, static_cast<std::uint16_t>(cpu.pc + 1)));
+                access_cycle = 8;
+                break;
+            case 0xF2:
+                address = static_cast<std::uint16_t>(0xFF00u + cpu.bc.reg8.low);
+                access_cycle = 8;
+                break;
+            case 0xFA:
+                address = cpu_read16(cpu, static_cast<std::uint16_t>(cpu.pc + 1));
+                access_cycle = 12;
+                break;
+            case 0xCB:
+            {
+                const std::uint8_t cb_opcode = cpu_read(cpu, static_cast<std::uint16_t>(cpu.pc + 1));
+                if ((cb_opcode & 0x07) == 6)
+                {
+                    address = cpu.hl.reg16;
+                    access_cycle = 8;
+                }
+                break;
+            }
+            default:
+                break;
+            }
+        }
+
+        const bool ppu_register = address >= 0xFF40 && address <= 0xFF4B;
+        const bool ppu_memory = (address >= 0x8000 && address <= 0x9FFF) ||
+                                (address >= 0xFE00 && address <= 0xFE9F);
+        return ppu_register || ppu_memory ? access_cycle : 0;
     }
 
     bool has_mooneye_pass_signature(const CPU_LR35902 &cpu)
@@ -105,8 +165,8 @@ namespace
                   << static_cast<unsigned>(cpu.memory[0xFF44]) << '/'
                   << static_cast<unsigned>(cpu.memory[0xFF45])
                   << " locks=" << cpu.vram_locked << '/' << cpu.oam_locked
-                  << "\nHRAM[FF80..FF90]:";
-        for (std::uint16_t address = 0xFF80; address <= 0xFF90; ++address)
+                  << "\nHRAM[FF80..FF9F]:";
+        for (std::uint16_t address = 0xFF80; address <= 0xFF9F; ++address)
         {
             std::cerr << ' ' << static_cast<unsigned>(cpu.memory[address]);
         }
@@ -154,7 +214,7 @@ int main(int argc, char **argv)
     {
         const uint16_t pc_before = cpu.pc;
         const uint8_t opcode = cpu_read(cpu, pc_before);
-        const int ppu_access_cycle = ppu_write_cycle(cpu, opcode);
+        const int ppu_access_cycle = std::max(ppu_write_cycle(cpu, opcode), ppu_read_cycle(cpu, opcode));
         if (ppu_access_cycle != 0)
         {
             update_ppu(cpu, ppu, ppu_access_cycle);

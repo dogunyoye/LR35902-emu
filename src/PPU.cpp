@@ -281,6 +281,10 @@ namespace
         if (ly == 144)
         {
             cpu.memory[0xFF0F] |= 0x01;
+            if ((cpu.memory[STAT] & 0x20) != 0)
+            {
+                cpu.memory[0xFF0F] |= 0x02;
+            }
             update_status(cpu, ppu, 1);
         }
         else if (ly < 144)
@@ -309,6 +313,8 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
             std::fill(ppu.framebuffer.begin(), ppu.framebuffer.end(), shade_color(0));
         }
         ppu.lcd_enabled = false;
+        ppu.startup_mode0 = false;
+        ppu.startup_first_line = false;
         ppu.cycles_into_line = 0;
         ppu.mode = 0;
         cpu.memory[STAT] &= 0xFC; // Freeze LY=LYC while the LCD clock is stopped.
@@ -322,7 +328,17 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         ppu.lcd_enabled = true;
         ppu.cycles_into_line = 0;
         cpu.memory[LY] = 0;
-        update_status(cpu, ppu, 2);
+        if (ppu.has_started)
+        {
+            ppu.startup_mode0 = true;
+            ppu.startup_first_line = true;
+            update_status(cpu, ppu, 0);
+        }
+        else
+        {
+            ppu.has_started = true;
+            update_status(cpu, ppu, 2);
+        }
     }
     else
     {
@@ -335,6 +351,14 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         if (ppu.mode == 2)
         {
             mode_boundary = 80;
+        }
+        else if (ppu.mode == 0 && ppu.startup_mode0)
+        {
+            mode_boundary = 80;
+        }
+        else if (ppu.mode == 0 && ppu.startup_first_line)
+        {
+            mode_boundary = 452;
         }
         else if (ppu.mode == 3)
         {
@@ -359,6 +383,12 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
             ppu.mode3_duration = calculate_mode3_duration(cpu, cpu.memory[LY]);
             update_status(cpu, ppu, 3);
         }
+        else if (ppu.mode == 0 && ppu.startup_mode0)
+        {
+            ppu.startup_mode0 = false;
+            ppu.mode3_duration = calculate_mode3_duration(cpu, cpu.memory[LY]);
+            update_status(cpu, ppu, 3);
+        }
         else if (ppu.mode == 3)
         {
             render_scanline(cpu, ppu);
@@ -367,6 +397,10 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         else
         {
             ppu.cycles_into_line = 0;
+            if (ppu.startup_first_line)
+            {
+                ppu.startup_first_line = false;
+            }
             advance_scanline(cpu, ppu);
         }
     }

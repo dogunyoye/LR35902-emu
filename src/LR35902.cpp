@@ -401,9 +401,9 @@ namespace
 
     uint16_t read_immediate16_with_dma_timing(CPU_LR35902 &cpu)
     {
-        advance_oam_dma_to_instruction_cycle(cpu, 8);
+        advance_oam_dma_to_instruction_cycle(cpu, 3);
         const uint8_t low = cpu_read(cpu, cpu.pc);
-        advance_oam_dma_to_instruction_cycle(cpu, 12);
+        advance_oam_dma_to_instruction_cycle(cpu, 7);
         const uint8_t high = cpu_read(cpu, static_cast<uint16_t>(cpu.pc + 1));
         return static_cast<uint16_t>(low | (high << 8));
     }
@@ -1341,7 +1341,7 @@ int execute_instruction(CPU_LR35902 &cpu)
     }
 
     case 0xE8: // ADD SP, e8
-        advance_oam_dma_to_instruction_cycle(cpu, 8);
+        advance_oam_dma_to_instruction_cycle(cpu, 0);
         cpu.sp = add_sp_offset(cpu, cpu_read(cpu, cpu.pc++));
         cycles = 16;
         break;
@@ -1402,7 +1402,7 @@ int execute_instruction(CPU_LR35902 &cpu)
     }
 
     case 0xF8: // LD HL, SP+e8
-        advance_oam_dma_to_instruction_cycle(cpu, 8);
+        advance_oam_dma_to_instruction_cycle(cpu, 0);
         cpu.hl.reg16 = add_sp_offset(cpu, cpu_read(cpu, cpu.pc++));
         cycles = 12;
         break;
@@ -1644,7 +1644,11 @@ int step_cpu(CPU_LR35902 &cpu)
     cpu.oam_dma_pop_preread_cycles = 0;
     if (cpu.oam_dma_active && cpu.pc >= 0xE000 && cpu.pc <= 0xFDFF)
     {
-        advance_oam_dma_for_cpu_instruction(cpu, 4);
+        const uint8_t echo_opcode = cpu.memory[static_cast<uint16_t>(cpu.pc - 0x2000)];
+        if (echo_opcode != 0xE8 && echo_opcode != 0xF8)
+        {
+            advance_oam_dma_for_cpu_instruction(cpu, 4);
+        }
     }
     const uint8_t opcode = cpu_read(cpu, cpu.pc);
     if (opcode == 0xCD || opcode == 0xC4 || opcode == 0xCC || opcode == 0xD4 || opcode == 0xDC)
@@ -1659,11 +1663,11 @@ int step_cpu(CPU_LR35902 &cpu)
     if (opcode == 0xC1 || opcode == 0xD1 || opcode == 0xE1 || opcode == 0xF1 ||
         opcode == 0xC9 || opcode == 0xD9)
     {
-        cpu.oam_dma_pop_preread_cycles = 8;
+        cpu.oam_dma_pop_preread_cycles = (opcode == 0xC9 || opcode == 0xD9) ? 4 : 8;
     }
     else if (opcode == 0xC0 || opcode == 0xC8 || opcode == 0xD0 || opcode == 0xD8)
     {
-        cpu.oam_dma_pop_preread_cycles = 12;
+        cpu.oam_dma_pop_preread_cycles = 8;
     }
 
     uint16_t timer_address = 0;
