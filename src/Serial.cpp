@@ -2,7 +2,13 @@
 
 void update_serial(CPU_LR35902 &cpu, int cycles)
 {
-    if (!cpu.serial_transfer_active || !cpu.serial_internal_clock || cycles <= 0)
+    if (cycles <= 0)
+    {
+        return;
+    }
+
+    cpu.serial_divider_accumulator = static_cast<uint16_t>(cpu.serial_divider_accumulator + cycles);
+    if (!cpu.serial_transfer_active || !cpu.serial_internal_clock)
     {
         return;
     }

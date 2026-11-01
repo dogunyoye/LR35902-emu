@@ -110,6 +110,7 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     cpu.hl.reg16 = 0x014D;
     cpu.sp = 0xFFFE;
     cpu.pc = 0x0100;
+    cpu.serial_divider_accumulator = 460; // DMG ABC/MGB post-boot serial clock phase.
     cpu.memory[0xFF00] = 0xCF;
     cpu.memory[0xFF40] = 0x91;
     cpu.memory[0xFF47] = 0xFC;

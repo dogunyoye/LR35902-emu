@@ -51,6 +51,7 @@ struct CPU_LR35902
     uint8_t serial_shift_register = 0xFF;
     bool serial_transfer_active = false;
     bool serial_internal_clock = false;
+    uint16_t serial_divider_accumulator = 0;
 
     // Memory routing state.
     bool cart_ram_enabled = false;

@@ -303,7 +303,9 @@ void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
         cpu.memory[SC_REG] = value & 0x81;
         cpu.serial_transfer_active = (value & 0x80) != 0;
         cpu.serial_internal_clock = (value & 0x01) != 0;
-        cpu.serial_cycles_remaining = cpu.serial_transfer_active && cpu.serial_internal_clock ? 8192 : 0;
+        cpu.serial_cycles_remaining = cpu.serial_transfer_active && cpu.serial_internal_clock
+                                          ? static_cast<uint16_t>(4096 - (cpu.serial_divider_accumulator & 0x01FF))
+                                          : 0;
         if (cpu.serial_transfer_active)
         {
             cpu.serial_shift_register = cpu.memory[SB_REG];
