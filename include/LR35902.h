@@ -25,6 +25,7 @@ struct CPU_LR35902
     uint16_t pc; // Program Counter
 
     bool halted;
+    bool stopped = false;
     bool ime; // Interrupt Master Enable flag
     bool halt_bug = false;
     uint8_t ime_enable_delay = 0;

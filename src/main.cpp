@@ -284,7 +284,7 @@ int main(int argc, char **argv)
             }
         }
 
-        while (running && cycle_accumulator < CYCLES_PER_FRAME)
+        while (running && !cpu.stopped && cycle_accumulator < CYCLES_PER_FRAME)
         {
             const int cycles = step_cpu(cpu);
             update_ppu(cpu, ppu, cycles);
@@ -292,7 +292,10 @@ int main(int argc, char **argv)
         }
         if (!running)
             break;
-        cycle_accumulator -= CYCLES_PER_FRAME;
+        if (cycle_accumulator >= CYCLES_PER_FRAME)
+        {
+            cycle_accumulator -= CYCLES_PER_FRAME;
+        }
 
         SDL_UpdateTexture(texture, nullptr, ppu.framebuffer.data(), GB_WIDTH * sizeof(uint32_t));
         SDL_RenderClear(renderer);

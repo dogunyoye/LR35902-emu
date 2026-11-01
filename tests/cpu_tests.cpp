@@ -569,6 +569,47 @@ static void test_halt_idle_wake_and_bug()
     assert(halt_bug_cpu.pc == 2);
 }
 
+static void test_stop_consumes_padding_byte()
+{
+    CPU_LR35902 cpu{};
+    cpu.memory[0] = 0x10; // STOP
+    cpu.memory[1] = 0x00; // STOP padding byte
+    cpu.memory[2] = 0x00; // NOP after wake
+
+    assert(step_cpu(cpu) == 4);
+    assert(cpu.pc == 2);
+    assert(cpu.stopped);
+
+    const uint16_t div_phase = cpu.div_cycle_accumulator;
+    assert(step_cpu(cpu) == 0);
+    assert(cpu.pc == 2);
+    assert(cpu.div_cycle_accumulator == div_phase);
+
+    cpu.memory[0xFF00] = 0x30; // Neither key group selected
+    cpu_set_joypad_button(cpu, JoypadButton::Start, true);
+    assert(!cpu.stopped);
+    assert(step_cpu(cpu) == 4);
+    assert(cpu.pc == 3);
+}
+
+static void test_stop_wakes_only_on_new_press()
+{
+    CPU_LR35902 cpu{};
+    cpu.memory[0] = 0x10; // STOP
+    cpu.memory[1] = 0x00;
+    cpu_set_joypad_button(cpu, JoypadButton::Right, true);
+
+    assert(step_cpu(cpu) == 4);
+    assert(cpu.stopped);
+    cpu_set_joypad_button(cpu, JoypadButton::Right, true); // Repeated key-down
+    assert(cpu.stopped);
+
+    cpu_set_joypad_button(cpu, JoypadButton::Right, false);
+    assert(cpu.stopped);
+    cpu_set_joypad_button(cpu, JoypadButton::Right, true);
+    assert(!cpu.stopped);
+}
+
 int main()
 {
     test_load_and_add();
@@ -590,5 +631,7 @@ int main()
     test_interrupt_dispatch_and_priority();
     test_ei_delay_before_interrupt_dispatch();
     test_halt_idle_wake_and_bug();
+    test_stop_consumes_padding_byte();
+    test_stop_wakes_only_on_new_press();
     return 0;
 }

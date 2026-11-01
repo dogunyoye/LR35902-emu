@@ -549,6 +549,12 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
     }
 
+    case 0x10: // STOP, followed by a padding byte
+        cpu.pc++;
+        cpu.stopped = true;
+        cycles = 4;
+        break;
+
     case 0x11: // LD DE, d16
         cpu.de.reg16 = cpu_read16(cpu, cpu.pc);
         cpu.pc += 2;
@@ -1547,6 +1553,11 @@ int step_cpu(CPU_LR35902 &cpu)
     constexpr uint16_t INTERRUPT_FLAGS = 0xFF0F;
     const uint8_t pending_interrupts = static_cast<uint8_t>(
         cpu.memory[INTERRUPT_ENABLE] & cpu.memory[INTERRUPT_FLAGS] & 0x1F);
+
+    if (cpu.stopped)
+    {
+        return 0;
+    }
 
     if (cpu.halted)
     {

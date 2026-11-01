@@ -71,6 +71,7 @@ namespace
         if ((old_lines & static_cast<uint8_t>(~new_lines) & 0x0F) != 0)
         {
             cpu.memory[0xFF0F] |= 0x10;
+            cpu.stopped = false;
         }
     }
 }
@@ -216,9 +217,14 @@ void cpu_set_joypad_button(CPU_LR35902 &cpu, JoypadButton button, bool pressed)
 
     const uint8_t old_lines = joypad_lines(cpu);
     const uint8_t button_mask = static_cast<uint8_t>(1u << button_index);
+    const bool was_pressed = (cpu.joypad_buttons & button_mask) == 0;
     if (pressed)
     {
         cpu.joypad_buttons &= static_cast<uint8_t>(~button_mask);
+        if (!was_pressed)
+        {
+            cpu.stopped = false;
+        }
     }
     else
     {
