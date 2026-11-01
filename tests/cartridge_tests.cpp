@@ -1,6 +1,7 @@
 #include "LR35902.h"
 
 #include <cassert>
+#include <filesystem>
 #include <utility>
 
 static std::vector<uint8_t> make_mbc1_ram_rom(uint8_t cartridge_type)
