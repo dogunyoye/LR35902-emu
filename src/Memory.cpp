@@ -43,6 +43,10 @@ namespace
                 bank = static_cast<std::size_t>(cpu.mbc1_bank_high) << 5;
             }
         }
+        else if (cpu.cartridge_mbc5)
+        {
+            bank = cpu.mbc5_rom_bank;
+        }
         else if (cpu.cartridge_mbc1)
         {
             bank = (static_cast<std::size_t>(cpu.mbc1_bank_high) << 5) | cpu.mbc1_rom_bank_low;
@@ -58,7 +62,8 @@ namespace
 
     std::size_t cartridge_ram_index(const CPU_LR35902 &cpu, uint16_t address)
     {
-        const std::size_t bank = cpu.mbc1_banking_mode != 0 ? cpu.mbc1_bank_high : 0;
+        const std::size_t bank = cpu.cartridge_mbc5 ? cpu.mbc5_ram_bank :
+                                 (cpu.mbc1_banking_mode != 0 ? cpu.mbc1_bank_high : 0);
         return (bank * 0x2000 + (address - 0xA000)) % cpu.cartridge_ram.size();
     }
 
@@ -104,7 +109,7 @@ namespace
 
     if (address >= 0xA000 && address < 0xC000 && !cpu.cartridge_rom.empty())
     {
-        if (!cpu.cartridge_mbc1 || !cpu.cart_ram_enabled || cpu.cartridge_ram.empty())
+        if ((!cpu.cartridge_mbc1 && !cpu.cartridge_mbc5) || !cpu.cart_ram_enabled || cpu.cartridge_ram.empty())
         {
             return 0xFF;
         }
@@ -212,7 +217,10 @@ void update_oam_dma(CPU_LR35902 &cpu, int cycles)
             {
                 const uint16_t source_address = static_cast<uint16_t>(
                     (static_cast<uint16_t>(cpu.oam_dma_source) << 8) + cpu.oam_dma_index);
-                cpu.memory[OAM_START + cpu.oam_dma_index] = cpu_read_unrestricted(cpu, source_address);
+                const uint16_t dma_bus_address = source_address >= 0xFE00
+                                                     ? static_cast<uint16_t>(source_address - 0x2000)
+                                                     : source_address;
+                cpu.memory[OAM_START + cpu.oam_dma_index] = cpu_read_unrestricted(cpu, dma_bus_address);
                 ++cpu.oam_dma_index;
             }
             continue;
@@ -228,7 +236,10 @@ void update_oam_dma(CPU_LR35902 &cpu, int cycles)
         const uint16_t source_address = static_cast<uint16_t>(
             (static_cast<uint16_t>(cpu.oam_dma_source) << 8) + cpu.oam_dma_index);
         const uint16_t destination_address = static_cast<uint16_t>(OAM_START + cpu.oam_dma_index);
-        cpu.memory[destination_address] = cpu_read_unrestricted(cpu, source_address);
+        const uint16_t dma_bus_address = source_address >= 0xFE00
+                                             ? static_cast<uint16_t>(source_address - 0x2000)
+                                             : source_address;
+        cpu.memory[destination_address] = cpu_read_unrestricted(cpu, dma_bus_address);
         ++cpu.oam_dma_index;
         if (cpu.oam_dma_index == 0xA0)
         {
@@ -348,7 +359,26 @@ void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
     {
         if (!cpu.cartridge_rom.empty())
         {
-            if (cpu.cartridge_mbc1)
+            if (cpu.cartridge_mbc5)
+            {
+                if (address < 0x2000)
+                {
+                    cpu.cart_ram_enabled = !cpu.cartridge_ram.empty() && (value & 0x0F) == 0x0A;
+                }
+                else if (address < 0x3000)
+                {
+                    cpu.mbc5_rom_bank = static_cast<uint16_t>((cpu.mbc5_rom_bank & 0x100) | value);
+                }
+                else if (address < 0x4000)
+                {
+                    cpu.mbc5_rom_bank = static_cast<uint16_t>((cpu.mbc5_rom_bank & 0xFF) | ((value & 0x01) << 8));
+                }
+                else if (address < 0x6000)
+                {
+                    cpu.mbc5_ram_bank = value & 0x0F;
+                }
+            }
+            else if (cpu.cartridge_mbc1)
             {
                 if (address < 0x2000)
                 {
@@ -383,7 +413,7 @@ void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
 
     if (address >= 0xA000 && address < 0xC000 && !cpu.cartridge_rom.empty())
     {
-        if (cpu.cartridge_mbc1 && cpu.cart_ram_enabled && !cpu.cartridge_ram.empty())
+        if ((cpu.cartridge_mbc1 || cpu.cartridge_mbc5) && cpu.cart_ram_enabled && !cpu.cartridge_ram.empty())
         {
             cpu.cartridge_ram[cartridge_ram_index(cpu, address)] = value;
         }

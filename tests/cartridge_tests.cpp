@@ -125,6 +125,30 @@ static void test_mbc1_ram_banking_and_enable()
     assert(cpu_read(cpu, 0xA000) == 0x34);
 }
 
+static void test_mbc5_banking_and_ram()
+{
+    std::vector<uint8_t> rom(0x8000, 0);
+    rom[0x0147] = 0x1B; // MBC5 + RAM + battery
+    rom[0x0148] = 0x00;
+    rom[0x0149] = 0x02;
+    rom[0x4000] = 0x51;
+    std::string error;
+    CPU_LR35902 cpu{};
+
+    assert(load_cartridge(cpu, std::move(rom), error));
+    assert(cpu.cartridge_mbc5);
+    assert(cpu.cartridge_battery_backed);
+    assert(cpu_read(cpu, 0x4000) == 0x51);
+    cpu_write(cpu, 0x2000, 0);
+    assert(cpu_read(cpu, 0x4000) == cpu_read(cpu, 0x0000)); // MBC5 permits bank zero.
+
+    cpu_write(cpu, 0x0000, 0x0A);
+    cpu_write(cpu, 0xA000, 0x37);
+    assert(cpu_read(cpu, 0xA000) == 0x37);
+    cpu_write(cpu, 0x0000, 0x00);
+    assert(cpu_read(cpu, 0xA000) == 0xFF);
+}
+
 static void test_battery_ram_persistence()
 {
     const std::filesystem::path save_path =
@@ -170,6 +194,7 @@ int main()
     test_rom_only_cartridge();
     test_mbc1_rom_banking();
     test_mbc1_ram_banking_and_enable();
+    test_mbc5_banking_and_ram();
     test_battery_ram_persistence();
     return 0;
 }

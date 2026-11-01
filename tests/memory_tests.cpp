@@ -58,10 +58,22 @@ static void test_oam_dma_transfer_and_bus_lock()
     assert(cpu_read(cpu, 0xC000) == 0x5A);
 }
 
+static void test_oam_dma_fe_source_uses_echo_bus()
+{
+    CPU_LR35902 cpu{};
+    cpu.memory[0xDE00] = 0xC2;
+    cpu.memory[0xDE01] = 0xD5;
+    cpu_write(cpu, 0xFF46, 0xFE);
+    update_oam_dma(cpu, 12);
+    assert(cpu.memory[0xFE00] == 0xC2);
+    assert(cpu.memory[0xFE01] == 0xD5);
+}
+
 int main()
 {
     test_unusable_oam_region();
     test_interrupt_flags_unused_bits();
     test_oam_dma_transfer_and_bus_lock();
+    test_oam_dma_fe_source_uses_echo_bus();
     return 0;
 }

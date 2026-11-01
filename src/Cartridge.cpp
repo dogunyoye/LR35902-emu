@@ -53,9 +53,10 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     const uint8_t cartridge_type = rom[CARTRIDGE_TYPE_ADDRESS];
     const bool rom_only = cartridge_type == 0x00;
     const bool mbc1 = cartridge_type >= 0x01 && cartridge_type <= 0x03;
-    if (!rom_only && !mbc1)
+    const bool mbc5 = cartridge_type >= 0x19 && cartridge_type <= 0x1E;
+    if (!rom_only && !mbc1 && !mbc5)
     {
-        error = "Unsupported cartridge type; supported types are ROM ONLY and MBC1.";
+        error = "Unsupported cartridge type; supported types are ROM ONLY, MBC1, and MBC5.";
         return false;
     }
 
@@ -79,10 +80,10 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     }
 
     std::size_t ram_size = 0;
-    if (mbc1)
+    if (mbc1 || mbc5)
     {
         const uint8_t ram_size_code = rom[RAM_SIZE_ADDRESS];
-        if (cartridge_type == 0x01)
+        if (mbc1 && cartridge_type == 0x01)
         {
             if (ram_size_code != 0)
             {
@@ -92,7 +93,7 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
         }
         else if (!ram_size_from_code(ram_size_code, ram_size))
         {
-            error = "Unsupported MBC1 RAM size code.";
+            error = "Unsupported cartridge RAM size code.";
             return false;
         }
     }
@@ -100,7 +101,8 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     cpu = CPU_LR35902{};
     cpu.cartridge_rom = std::move(rom);
     cpu.cartridge_mbc1 = mbc1;
-    cpu.cartridge_battery_backed = cartridge_type == 0x03;
+    cpu.cartridge_mbc5 = mbc5;
+    cpu.cartridge_battery_backed = cartridge_type == 0x03 || cartridge_type == 0x1B || cartridge_type == 0x1E;
     cpu.cartridge_ram.assign(ram_size, 0xFF);
     cpu.af.reg16 = 0x01B0;
     cpu.bc.reg16 = 0x0013;
