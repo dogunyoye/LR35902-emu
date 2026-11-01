@@ -17,6 +17,8 @@ const uint16_t HRAM_START = 0xFF80;
 const uint16_t HRAM_END = 0xFFFE;
 const uint16_t IE_REG = 0xFFFF; // Interrupt Enable Register
 const uint16_t JOYP_REG = 0xFF00;
+const uint16_t SB_REG = 0xFF01;
+const uint16_t SC_REG = 0xFF02;
 
 namespace
 {
@@ -102,6 +104,11 @@ uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
         return static_cast<uint8_t>(0xC0 | (cpu.memory[JOYP_REG] & 0x30) | joypad_lines(cpu));
     }
 
+    if (address == SC_REG)
+    {
+        return static_cast<uint8_t>(0x7E | (cpu.memory[SC_REG] & 0x81));
+    }
+
     if (address >= VRAM_START && address <= VRAM_END && cpu.vram_locked)
     {
         return 0xFF;
@@ -127,6 +134,19 @@ void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
         const uint8_t old_lines = joypad_lines(cpu);
         cpu.memory[JOYP_REG] = value & 0x30;
         request_joypad_interrupt_on_falling_edge(cpu, old_lines);
+        return;
+    }
+
+    if (address == SC_REG)
+    {
+        cpu.memory[SC_REG] = value & 0x81;
+        cpu.serial_transfer_active = (value & 0x80) != 0;
+        cpu.serial_internal_clock = (value & 0x01) != 0;
+        cpu.serial_cycles_remaining = cpu.serial_transfer_active && cpu.serial_internal_clock ? 8192 : 0;
+        if (cpu.serial_transfer_active)
+        {
+            cpu.serial_shift_register = cpu.memory[SB_REG];
+        }
         return;
     }
 

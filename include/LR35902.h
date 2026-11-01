@@ -32,7 +32,11 @@ struct CPU_LR35902
     uint8_t ime_enable_delay = 0;
     uint16_t div_cycle_accumulator = 0;
     uint16_t tima_cycle_accumulator = 0;
+    uint16_t serial_cycles_remaining = 0;
     uint8_t joypad_buttons = 0xFF;
+    uint8_t serial_shift_register = 0xFF;
+    bool serial_transfer_active = false;
+    bool serial_internal_clock = false;
 
     // Memory routing state.
     bool cart_ram_enabled = false;
@@ -45,6 +49,7 @@ struct CPU_LR35902
     bool oam_locked = false;
     std::vector<uint8_t> cartridge_rom;
     std::vector<uint8_t> cartridge_ram;
+    std::string serial_output;
 
     // 64KB Flat Address Space (will be replaced later with custom read/write routers)
     std::array<uint8_t, 65536> memory;
@@ -95,6 +100,7 @@ uint16_t cpu_read16(CPU_LR35902 &cpu, uint16_t address);
 void cpu_push16(CPU_LR35902 &cpu, uint16_t val);
 uint16_t cpu_pop16(CPU_LR35902 &cpu);
 void update_timers(CPU_LR35902 &cpu, int cycles);
+void update_serial(CPU_LR35902 &cpu, int cycles);
 bool load_rom_only_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error);
 bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error);
 bool load_cartridge_ram(CPU_LR35902 &cpu, const std::filesystem::path &path, std::string &error);

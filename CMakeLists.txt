@@ -21,7 +21,7 @@ elseif(MSVC)
 endif()
 
 # Emulator core library (static for simple linking into future exe/tests)
-add_library(lr35902 STATIC src/Memory.cpp src/LR35902.cpp src/Timer.cpp src/Cartridge.cpp src/PPU.cpp)
+add_library(lr35902 STATIC src/Memory.cpp src/LR35902.cpp src/Timer.cpp src/Cartridge.cpp src/PPU.cpp src/Serial.cpp)
 target_compile_features(lr35902 PUBLIC cxx_std_20)
 target_include_directories(lr35902 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(lr35902 PRIVATE lr35902_warnings)
@@ -43,7 +43,11 @@ add_emulator_test(timer_tests tests/timer_tests.cpp)
 add_emulator_test(cartridge_tests tests/cartridge_tests.cpp)
 add_emulator_test(memory_tests tests/memory_tests.cpp)
 add_emulator_test(joypad_tests tests/joypad_tests.cpp)
+add_emulator_test(serial_tests tests/serial_tests.cpp)
 add_emulator_test(ppu_tests tests/ppu_tests.cpp)
+
+add_executable(rom_test_runner tests/rom_test_runner.cpp)
+target_link_libraries(rom_test_runner PRIVATE lr35902 lr35902_warnings)
 
 find_package(SDL2 REQUIRED)
 

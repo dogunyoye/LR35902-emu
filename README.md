@@ -17,10 +17,12 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | Timer registers (DIV/TIMA/TMA/TAC) and update logic | :white_check_mark: done |
 | Interrupt dispatch, priority, delayed EI, and HALT wake-up | :white_check_mark: done |
 | JOYP register, keyboard input, and joypad interrupt | :white_check_mark: done |
+| SB/SC serial transfer and serial interrupt | :white_check_mark: done |
+| Serial-output ROM test runner | :white_check_mark: done |
 | Cycle-driven CPU and timer stepping | :white_check_mark: done |
 | Approximate variable mode-3 timing, BG/window/sprite rendering, VBlank and STAT interrupts | :white_check_mark: done |
-| Regression tests for CPU, timer, interrupt, joypad, cartridge, memory, and PPU behavior | :white_check_mark: done |
-| CLI runner with cycle-driven frames and ROM-only loading | :white_check_mark: done |
+| Regression tests for CPU, timer, serial, interrupts, joypad, cartridge, memory, and PPU behavior | :white_check_mark: done |
+| CLI runner with cycle-driven ROM-only/MBC1 support and keyboard controls | :white_check_mark: done |
 | Cycle-exact CPU and peripheral conformance | :soon: planned |
 | MBC5 and other mapper emulation | :soon: planned |
 | Full PPU and hardware fidelity | :soon: planned |
@@ -37,14 +39,23 @@ cmake --build build
 This generates:
 
 - the static library: `build/liblr35902.a`
-- test executables: `build/cpu_tests`, `build/timer_tests`, `build/cartridge_tests`, `build/memory_tests`, `build/joypad_tests`, and `build/ppu_tests`
+- test executables: `build/cpu_tests`, `build/timer_tests`, `build/cartridge_tests`, `build/memory_tests`, `build/joypad_tests`, `build/serial_tests`, and `build/ppu_tests`
 - the emulator CLI: `build/lr35902-emu`
+- the serial ROM test runner: `build/rom_test_runner`
 
 Run the test suite with:
 
 ```sh
 ctest --test-dir build --output-on-failure
 ```
+
+Run a serial-reporting ROM test (for example, a CPU conformance ROM):
+
+```sh
+./build/rom_test_runner /path/to/test.gb [MAX_CYCLES]
+```
+
+The runner prints serial output and returns 0 when it sees `Passed`, 1 for `Failed`, or 2 if neither marker appears before the cycle limit (default: 50,000,000).
 
 ### Debug builds
 
@@ -92,6 +103,7 @@ Show usage/help:
 │   ├── Memory.cpp       # Memory routing and access rules
 │   ├── Cartridge.cpp    # ROM-only/MBC1 validation, banking, and save RAM
 │   ├── PPU.cpp          # LCD modes, scanlines, and BG/window/sprite composition
+│   ├── Serial.cpp       # Internal-clock serial transfers and test output
 │   ├── Timer.cpp        # Divider/timer register updates
 │   └── main.cpp         # CLI entry point and demo runner
 ├── tests/
@@ -100,7 +112,9 @@ Show usage/help:
 │   ├── cartridge_tests.cpp  # ROM-only/MBC1 loading, banking, and save persistence
 │   ├── memory_tests.cpp     # Memory-bus address behavior
 │   ├── joypad_tests.cpp     # JOYP selection and interrupt behavior
-│   └── ppu_tests.cpp        # PPU modes, scanlines, window, and sprites
+│   ├── serial_tests.cpp     # Serial transfer and interrupt behavior
+│   ├── ppu_tests.cpp        # PPU modes, scanlines, window, and sprites
+│   └── rom_test_runner.cpp  # Serial-output ROM conformance runner
 └── build/               # Generated CMake build output
 ```
 

@@ -1564,6 +1564,7 @@ int step_cpu(CPU_LR35902 &cpu)
         if (pending_interrupts == 0)
         {
             update_timers(cpu, 4);
+            update_serial(cpu, 4);
             return 4;
         }
         cpu.halted = false;
@@ -1583,10 +1584,12 @@ int step_cpu(CPU_LR35902 &cpu)
         cpu_push16(cpu, cpu.pc);
         cpu.pc = static_cast<uint16_t>(0x0040 + interrupt_bit * 8);
         update_timers(cpu, 20);
+        update_serial(cpu, 20);
         return 20;
     }
 
     const int cycles = execute_instruction(cpu);
     update_timers(cpu, cycles);
+    update_serial(cpu, cycles);
     return cycles;
 }
