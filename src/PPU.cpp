@@ -315,6 +315,7 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         ppu.lcd_enabled = false;
         ppu.startup_mode0 = false;
         ppu.startup_first_line = false;
+        ppu.startup_first_enable = false;
         ppu.cycles_into_line = 0;
         ppu.mode = 0;
         cpu.memory[STAT] &= 0xFC; // Freeze LY=LYC while the LCD clock is stopped.
@@ -332,6 +333,8 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         {
             ppu.startup_mode0 = true;
             ppu.startup_first_line = true;
+            ppu.startup_first_enable = !ppu.has_reenabled;
+            ppu.has_reenabled = true;
             update_status(cpu, ppu, 0);
         }
         else
@@ -354,11 +357,11 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         }
         else if (ppu.mode == 0 && ppu.startup_mode0)
         {
-            mode_boundary = 80;
+            mode_boundary = 84;
         }
         else if (ppu.mode == 0 && ppu.startup_first_line)
         {
-            mode_boundary = 452;
+            mode_boundary = 458;
         }
         else if (ppu.mode == 3)
         {
@@ -387,6 +390,7 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         {
             ppu.startup_mode0 = false;
             ppu.mode3_duration = calculate_mode3_duration(cpu, cpu.memory[LY]);
+            ppu.mode3_duration += 2;
             update_status(cpu, ppu, 3);
         }
         else if (ppu.mode == 3)
@@ -400,8 +404,14 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
             if (ppu.startup_first_line)
             {
                 ppu.startup_first_line = false;
+                ppu.startup_first_enable = false;
             }
             advance_scanline(cpu, ppu);
         }
+    }
+
+    if (ppu.mode == 2 && ppu.cycles_into_line >= 76)
+    {
+        cpu.oam_locked = false;
     }
 }

@@ -20,6 +20,8 @@ struct PPU_LR35902
     bool has_started = false;
     bool startup_mode0 = false;
     bool startup_first_line = false;
+    bool startup_first_enable = false;
+    bool has_reenabled = false;
     bool framebuffer_initialized = false;
     bool stat_interrupt_line = false;
 };

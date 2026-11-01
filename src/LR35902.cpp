@@ -455,8 +455,9 @@ uint16_t cpu_pop16(CPU_LR35902 &cpu)
     uint8_t low = cpu_read(cpu, cpu.sp);
     if (cpu.cpu_instruction_active)
     {
-        advance_oam_dma_for_cpu_instruction(cpu, 4);
-        advance_timers_for_cpu_instruction(cpu, 4);
+        const int high_byte_cycle = cpu.oam_dma_pop_interbyte_cycles;
+        advance_oam_dma_for_cpu_instruction(cpu, high_byte_cycle);
+        advance_timers_for_cpu_instruction(cpu, high_byte_cycle);
     }
     uint8_t high = cpu_read(cpu, cpu.sp + 1);
     cpu.sp += 2;
@@ -1642,6 +1643,7 @@ int step_cpu(CPU_LR35902 &cpu)
     cpu.cpu_instruction_timer_cycles = 0;
     cpu.oam_dma_push_prewrite_cycles = 0;
     cpu.oam_dma_pop_preread_cycles = 0;
+    cpu.oam_dma_pop_interbyte_cycles = 4;
     if (cpu.oam_dma_active && cpu.pc >= 0xE000 && cpu.pc <= 0xFDFF)
     {
         const uint8_t echo_opcode = cpu.memory[static_cast<uint16_t>(cpu.pc - 0x2000)];
@@ -1664,10 +1666,15 @@ int step_cpu(CPU_LR35902 &cpu)
         opcode == 0xC9 || opcode == 0xD9)
     {
         cpu.oam_dma_pop_preread_cycles = (opcode == 0xC9 || opcode == 0xD9) ? 4 : 8;
+        if (opcode == 0xC9 || opcode == 0xD9)
+        {
+            cpu.oam_dma_pop_interbyte_cycles = 3;
+        }
     }
     else if (opcode == 0xC0 || opcode == 0xC8 || opcode == 0xD0 || opcode == 0xD8)
     {
         cpu.oam_dma_pop_preread_cycles = 8;
+        cpu.oam_dma_pop_interbyte_cycles = 3;
     }
 
     uint16_t timer_address = 0;

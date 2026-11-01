@@ -46,9 +46,34 @@ namespace
             address = static_cast<std::uint16_t>(0xFF00u + cpu.bc.reg8.low);
             access_cycle = address == 0xFF44 ? 8 : 4;
             break;
+        case 0x02:
+            address = cpu.bc.reg16;
+            access_cycle = (address >= 0x8000 && address <= 0x9FFF) ||
+                                   (address >= 0xFE00 && address <= 0xFE9F)
+                               ? 8
+                               : 4;
+            break;
+        case 0x12:
+            address = cpu.de.reg16;
+            access_cycle = (address >= 0x8000 && address <= 0x9FFF) ||
+                                   (address >= 0xFE00 && address <= 0xFE9F)
+                               ? 8
+                               : 4;
+            break;
+        case 0x22:
+        case 0x32:
+            address = cpu.hl.reg16;
+            access_cycle = (address >= 0x8000 && address <= 0x9FFF) ||
+                                   (address >= 0xFE00 && address <= 0xFE9F)
+                               ? 8
+                               : 4;
+            break;
         case 0x77:
             address = cpu.hl.reg16;
-            access_cycle = 4;
+            access_cycle = (address >= 0x8000 && address <= 0x9FFF) ||
+                                   (address >= 0xFE00 && address <= 0xFE9F)
+                               ? 8
+                               : 4;
             break;
         case 0x36:
             address = cpu.hl.reg16;
@@ -69,17 +94,21 @@ namespace
             return 0;
         }
 
-        return address >= 0xFF40 && address <= 0xFF4B ? access_cycle : 0;
+        const bool ppu_register = address >= 0xFF40 && address <= 0xFF4B;
+        const bool ppu_memory = (address >= 0x8000 && address <= 0x9FFF) ||
+                                (address >= 0xFE00 && address <= 0xFE9F);
+        return ppu_register || ppu_memory ? access_cycle : 0;
     }
 
-    int ppu_read_cycle(CPU_LR35902 &cpu, std::uint8_t opcode)
+    int ppu_read_cycle(CPU_LR35902 &cpu, PPU_LR35902 &ppu, std::uint8_t opcode)
     {
         std::uint16_t address = 0;
         int access_cycle = 0;
+        const int ly_read_cycle = ppu.startup_first_line && !ppu.startup_first_enable ? 12 : 8;
         if ((opcode >= 0x40 && opcode <= 0x7F) && opcode != 0x76 && (opcode & 0x07) == 0x06)
         {
             address = cpu.hl.reg16;
-            access_cycle = address == 0xFF44 ? 8 : 4;
+            access_cycle = address == 0xFF44 ? ly_read_cycle : 4;
         }
         else
         {
@@ -87,16 +116,16 @@ namespace
             {
             case 0x0A:
                 address = cpu.bc.reg16;
-                access_cycle = address == 0xFF44 ? 8 : 4;
+                access_cycle = address == 0xFF44 ? ly_read_cycle : 4;
                 break;
             case 0x1A:
                 address = cpu.de.reg16;
-                access_cycle = address == 0xFF44 ? 8 : 4;
+                access_cycle = address == 0xFF44 ? ly_read_cycle : 4;
                 break;
             case 0x2A:
             case 0x3A:
                 address = cpu.hl.reg16;
-                access_cycle = address == 0xFF44 ? 8 : 4;
+                access_cycle = address == 0xFF44 ? ly_read_cycle : 4;
                 break;
             case 0xF0:
                 address = static_cast<std::uint16_t>(0xFF00u + cpu_read(cpu, static_cast<std::uint16_t>(cpu.pc + 1)));
@@ -214,7 +243,7 @@ int main(int argc, char **argv)
     {
         const uint16_t pc_before = cpu.pc;
         const uint8_t opcode = cpu_read(cpu, pc_before);
-        const int ppu_access_cycle = std::max(ppu_write_cycle(cpu, opcode), ppu_read_cycle(cpu, opcode));
+        const int ppu_access_cycle = std::max(ppu_write_cycle(cpu, opcode), ppu_read_cycle(cpu, ppu, opcode));
         if (ppu_access_cycle != 0)
         {
             update_ppu(cpu, ppu, ppu_access_cycle);

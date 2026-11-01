@@ -45,6 +45,7 @@ struct CPU_LR35902
     int cpu_instruction_timer_cycles = 0;
     int oam_dma_push_prewrite_cycles = 0;
     int oam_dma_pop_preread_cycles = 0;
+    int oam_dma_pop_interbyte_cycles = 4;
     uint16_t serial_cycles_remaining = 0;
     uint8_t joypad_buttons = 0xFF;
     uint8_t serial_shift_register = 0xFF;

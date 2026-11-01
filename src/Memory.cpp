@@ -186,7 +186,10 @@ uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
     }
     const bool hram_access = address >= HRAM_START && address <= HRAM_END;
     const bool echo_wram_access = address >= ECHO_START && address <= ECHO_END;
-    if (cpu.oam_dma_bus_blocked && !hram_access && !echo_wram_access && address != 0xFF46)
+    const bool rom_access_during_vram_dma = address >= 0x0100 && address < 0x8000 &&
+                                            cpu.oam_dma_source >= 0x80 && cpu.oam_dma_source <= 0x9F;
+    if (cpu.oam_dma_bus_blocked && !hram_access && !echo_wram_access &&
+        !rom_access_during_vram_dma && address != 0xFF46)
     {
         return 0xFF;
     }
