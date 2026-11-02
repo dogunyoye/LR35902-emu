@@ -9,6 +9,9 @@ namespace
     constexpr uint16_t TMA = 0xFF06;
     constexpr uint16_t TAC = 0xFF07;
     constexpr uint16_t IF = 0xFF0F;
+    // The APU frame sequencer steps when bit 4 of DIV (bit 12 of the internal
+    // counter) falls, at 512 Hz.
+    constexpr uint16_t FRAME_SEQUENCER_BIT = 0x1000;
 
     uint8_t timer_divider_bit(uint8_t tac)
     {
@@ -63,6 +66,10 @@ namespace
 
 void reset_divider(CPU_LR35902 &cpu)
 {
+    if ((cpu.div_cycle_accumulator & FRAME_SEQUENCER_BIT) != 0)
+    {
+        apu_frame_sequencer_step(cpu.apu); // Resetting DIV can make bit 4 fall early.
+    }
     const bool old_timer_input = timer_input(cpu);
     cpu.div_cycle_accumulator = 0;
     cpu.memory[DIV] = 0;
@@ -88,7 +95,12 @@ void update_timers(CPU_LR35902 &cpu, int cycles)
         cpu.tima_reloaded_this_cycle = false;
         const bool reload_was_pending = cpu.tima_reload_delay != 0;
         const bool old_timer_input = timer_input(cpu);
+        const uint16_t old_divider = cpu.div_cycle_accumulator;
         cpu.div_cycle_accumulator = static_cast<uint16_t>(cpu.div_cycle_accumulator + 1);
+        if ((old_divider & ~cpu.div_cycle_accumulator & FRAME_SEQUENCER_BIT) != 0)
+        {
+            apu_frame_sequencer_step(cpu.apu);
+        }
         cpu.memory[DIV] = static_cast<uint8_t>(cpu.div_cycle_accumulator >> 8);
         apply_timer_falling_edge(cpu, old_timer_input);
 

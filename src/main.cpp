@@ -256,7 +256,7 @@ int main(int argc, char **argv)
     const bool renderer_vsync = SDL_GetRendererInfo(renderer, &renderer_info) == 0 &&
                                 (renderer_info.flags & SDL_RENDERER_PRESENTVSYNC) != 0;
 
-    SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888,
+    SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                                              SDL_TEXTUREACCESS_STREAMING, GB_WIDTH,
                                              GB_HEIGHT);
     if (!texture)
@@ -270,6 +270,27 @@ int main(int argc, char **argv)
 
     PPU_LR35902 ppu{};
     cpu.ppu = &ppu;
+
+    SDL_AudioSpec audio_request{};
+    audio_request.freq = APU_LR35902::SAMPLE_RATE;
+    audio_request.format = AUDIO_S16SYS;
+    audio_request.channels = 2;
+    audio_request.samples = 1024;
+    SDL_AudioSpec audio_spec{};
+    const SDL_AudioDeviceID audio_device = SDL_OpenAudioDevice(nullptr, 0, &audio_request, &audio_spec, 0);
+    if (audio_device != 0)
+    {
+        cpu.apu.sample_output = true;
+        SDL_PauseAudioDevice(audio_device, 0);
+    }
+    else
+    {
+        std::cerr << "Audio unavailable: " << SDL_GetError() << std::endl;
+    }
+    // Drop audio rather than queue more than this, so latency stays low when
+    // the display refresh runs slightly faster than the Game Boy.
+    constexpr Uint32 MAX_QUEUED_AUDIO_BYTES = APU_LR35902::SAMPLE_RATE / 10 * 2 * sizeof(int16_t);
+
     bool running = true;
     int cycle_accumulator = 0;
 
@@ -309,6 +330,16 @@ int main(int argc, char **argv)
             cycle_accumulator -= CYCLES_PER_FRAME;
         }
 
+        if (audio_device != 0)
+        {
+            if (SDL_GetQueuedAudioSize(audio_device) < MAX_QUEUED_AUDIO_BYTES)
+            {
+                SDL_QueueAudio(audio_device, cpu.apu.samples.data(),
+                               static_cast<Uint32>(cpu.apu.samples.size() * sizeof(int16_t)));
+            }
+            cpu.apu.samples.clear();
+        }
+
         SDL_UpdateTexture(texture, nullptr, ppu.framebuffer.data(), GB_WIDTH * sizeof(uint32_t));
         SDL_RenderClear(renderer);
         SDL_RenderCopy(renderer, texture, nullptr, nullptr);
@@ -320,6 +351,10 @@ int main(int argc, char **argv)
         }
     }
 
+    if (audio_device != 0)
+    {
+        SDL_CloseAudioDevice(audio_device);
+    }
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);

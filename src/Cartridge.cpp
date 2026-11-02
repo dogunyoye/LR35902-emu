@@ -262,27 +262,6 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     cpu.serial_divider_accumulator = 460; // DMG ABC/MGB post-boot serial clock phase.
     cpu.memory[0xFF00] = 0xCF;
     cpu.memory[0xFF0F] = 0x01;
-    cpu.memory[0xFF11] = 0xBF;
-    cpu.memory[0xFF12] = 0xF3;
-    cpu.memory[0xFF13] = 0xFF;
-    cpu.memory[0xFF14] = 0xBF;
-    cpu.memory[0xFF16] = 0x3F;
-    cpu.memory[0xFF18] = 0xFF;
-    cpu.memory[0xFF19] = 0xBF;
-    cpu.memory[0xFF1B] = 0xFF;
-    cpu.memory[0xFF1D] = 0xFF;
-    cpu.memory[0xFF1E] = 0xBF;
-    cpu.memory[0xFF20] = 0x3F;
-    cpu.memory[0xFF23] = 0x80;
-    cpu.memory[0xFF24] = 0x77;
-    cpu.memory[0xFF25] = 0xF3;
-    cpu.memory[0xFF26] = 0xF1;
-    cpu.memory[0xFF2A] = 0xFF;
-    cpu.memory[0xFF2B] = 0xFF;
-    cpu.memory[0xFF2C] = 0xFF;
-    cpu.memory[0xFF2D] = 0xFF;
-    cpu.memory[0xFF2E] = 0xFF;
-    cpu.memory[0xFF2F] = 0xFF;
     cpu.memory[0xFF46] = 0xFF;
     cpu.memory[0xFF40] = 0x91;
     cpu.memory[0xFF47] = 0xFC;
@@ -291,7 +270,9 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     cpu.memory[0xFF4A] = 0x00;
     cpu.memory[0xFF4B] = 0x00;
     cpu.memory[0xFF50] = 0xFF;
-    if (model != GameBoyModel::Sgb && model != GameBoyModel::Sgb2)
+    const bool sgb = model == GameBoyModel::Sgb || model == GameBoyModel::Sgb2;
+    apu_power_on_after_boot(cpu.apu, !sgb); // The SGB boot ROM plays no chime.
+    if (!sgb)
     {
         load_boot_logo(cpu);
     }
@@ -314,7 +295,6 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
         cpu.de.reg16 = 0x0000;
         cpu.hl.reg16 = 0xC060;
         cpu.memory[0xFF00] = 0xFF;
-        cpu.memory[0xFF26] = 0xF0;
         cpu.div_cycle_accumulator = global_checksum == 0x96A7 ? 0xD84C : 0xD85C;
         cpu.memory[0xFF04] = 0xD8;
         break;
@@ -324,7 +304,6 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
         cpu.de.reg16 = 0x0000;
         cpu.hl.reg16 = 0xC060;
         cpu.memory[0xFF00] = 0xFF;
-        cpu.memory[0xFF26] = 0xF0;
         cpu.div_cycle_accumulator = global_checksum == 0x96A7 ? 0xD84C : 0xD85C;
         cpu.memory[0xFF04] = 0xD8;
         break;

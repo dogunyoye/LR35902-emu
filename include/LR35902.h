@@ -1,4 +1,6 @@
 #pragma once
+#include "APU.h"
+
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -49,6 +51,7 @@ struct CPU_LR35902
     int bus_cycles = 0;
     // PPU advanced alongside the CPU, if any.
     PPU_LR35902 *ppu = nullptr;
+    APU_LR35902 apu;
     uint16_t serial_cycles_remaining = 0;
     uint8_t joypad_buttons = 0xFF;
     uint8_t serial_shift_register = 0xFF;

@@ -171,22 +171,9 @@ namespace
         return static_cast<uint8_t>(0xF8 | (cpu.memory[address] & 0x07));
     }
 
-    switch (address)
+    if (address >= 0xFF10 && address <= 0xFF3F)
     {
-    case 0xFF10:
-        return static_cast<uint8_t>(cpu.memory[address] | 0x80);
-    case 0xFF1A:
-        return static_cast<uint8_t>((cpu.memory[address] & 0x80) | 0x7F);
-    case 0xFF1C:
-        return static_cast<uint8_t>((cpu.memory[address] & 0x60) | 0x9F);
-    case 0xFF20:
-        return static_cast<uint8_t>((cpu.memory[address] & 0x3F) | 0xC0);
-    case 0xFF23:
-        return static_cast<uint8_t>((cpu.memory[address] & 0xC0) | 0x3F);
-    case 0xFF26:
-        return static_cast<uint8_t>((cpu.memory[address] & 0x8F) | 0x70);
-    default:
-        break;
+        return apu_read(cpu.apu, address);
     }
 
     if (address >= VRAM_START && address <= VRAM_END && cpu.vram_locked)
@@ -275,6 +262,7 @@ namespace
         update_oam_dma(cpu, cycles);
         update_serial(cpu, cycles);
         update_cartridge_rtc(cpu, cycles);
+        apu_tick(cpu.apu, cycles);
     }
 
     void tick_ppu(CPU_LR35902 &cpu, int cycles)
@@ -314,6 +302,12 @@ namespace
             cpu.memory[address] = value;
             cpu.oam_dma_pending_source = value;
             cpu.oam_dma_start_delay = 2;
+            return;
+        }
+
+        if (address >= 0xFF10 && address <= 0xFF3F)
+        {
+            apu_write(cpu.apu, address, value);
             return;
         }
 

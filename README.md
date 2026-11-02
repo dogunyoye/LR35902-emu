@@ -21,6 +21,7 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | Serial-output ROM test runner | :white_check_mark: done |
 | M-cycle bus timing: timers, OAM DMA, serial, and PPU advance with each CPU memory access | :white_check_mark: done |
 | Per-dot pixel FIFO rendering (mid-line register changes), variable mode-3 timing, VBlank and STAT interrupts | :white_check_mark: done |
+| Sound: two square channels (one with sweep), wave and noise channels, stereo mixing to SDL audio | :white_check_mark: done |
 | Regression tests for CPU, timer, serial, interrupts, joypad, cartridge, memory, and PPU behavior | :white_check_mark: done |
 | CLI runner with cycle-driven cartridge support and keyboard controls | :white_check_mark: done |
 | Sub-M-cycle peripheral conformance (OAM corruption bug, DMA bus conflicts) | :soon: planned |
@@ -39,7 +40,7 @@ cmake --build build
 This generates:
 
 - the static library: `build/liblr35902.a`
-- test executables: `build/cpu_tests`, `build/timer_tests`, `build/cartridge_tests`, `build/memory_tests`, `build/joypad_tests`, `build/serial_tests`, and `build/ppu_tests`
+- test executables: `build/cpu_tests`, `build/timer_tests`, `build/cartridge_tests`, `build/memory_tests`, `build/joypad_tests`, `build/serial_tests`, `build/ppu_tests`, and `build/apu_tests`
 - the emulator CLI: `build/lr35902-emu`
 - the serial ROM test runner: `build/rom_test_runner`
 
@@ -106,12 +107,15 @@ Show usage/help:
 ├── LICENSE
 ├── README.md
 ├── include/
-│   └── LR35902.h        # CPU state model, flags, public API
+│   ├── LR35902.h        # CPU state model, flags, public API
+│   ├── PPU.h            # PPU state and pixel pipeline
+│   └── APU.h            # Sound channel state and sample output
 ├── src/
 │   ├── LR35902.cpp      # Instruction decoder, flags, interrupt stepping
 │   ├── Memory.cpp       # Memory routing and access rules
 │   ├── Cartridge.cpp    # Cartridge validation, banking, and save RAM
-│   ├── PPU.cpp          # LCD modes, scanlines, and BG/window/sprite composition
+│   ├── PPU.cpp          # LCD modes, scanlines, and the per-dot pixel FIFO
+│   ├── APU.cpp          # Sound channels, frame sequencer, and mixing
 │   ├── Serial.cpp       # Internal-clock serial transfers and test output
 │   ├── Timer.cpp        # Divider/timer register updates
 │   └── main.cpp         # CLI entry point and demo runner
@@ -123,7 +127,10 @@ Show usage/help:
 │   ├── joypad_tests.cpp     # JOYP selection and interrupt behavior
 │   ├── serial_tests.cpp     # Serial transfer and interrupt behavior
 │   ├── ppu_tests.cpp        # PPU modes, scanlines, window, and sprites
-│   └── rom_test_runner.cpp  # Serial-output ROM conformance runner
+│   ├── apu_tests.cpp        # Sound registers, length counters, and output
+│   ├── rom_test_runner.cpp  # ROM conformance runner (serial, signatures, screenshots)
+│   ├── run_rom_suites.sh    # Runs the Mooneye, blargg, dmg-acid2, and Mealybug suites
+│   └── compare_screenshot.py # Compares screenshots with DMG reference images
 └── build/               # Generated CMake build output
 ```
 
