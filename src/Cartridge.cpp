@@ -130,6 +130,12 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
             error = "Unsupported cartridge RAM size code.";
             return false;
         }
+        else if (ram_size == 0 && cartridge_type != 0x19 && cartridge_type != 0x1C)
+        {
+            // Some homebrew and test ROMs declare a RAM cartridge type with no
+            // RAM size; give them a single 8 KiB bank as other emulators do.
+            ram_size = 0x2000;
+        }
     }
 
     const bool mbc1_multicart = mbc1 && is_mbc1_multicart(rom);

@@ -19,6 +19,9 @@ struct PPU_LR35902
     // Line used for the LY=LYC comparison. -1 disables the comparison, which
     // happens for a few dots after LY changes.
     int ly_for_comparison = 0;
+    // Window line counter, and whether LY has matched WY this frame.
+    int window_line = 0;
+    bool window_y_triggered = false;
     std::uint8_t mode = 0;
     bool lcd_enabled = false;
     bool has_started = false;

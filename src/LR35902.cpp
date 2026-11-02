@@ -978,7 +978,7 @@ int execute_instruction(CPU_LR35902 &cpu)
         uint16_t total = static_cast<uint16_t>(a) + static_cast<uint16_t>(operand);
         apply_add_flags(cpu, a, operand, false, static_cast<uint8_t>(total & 0xFF));
         cpu.af.reg8.high = static_cast<uint8_t>(total & 0xFF);
-        cycles = 4;
+        cycles = (opcode & 0x07) == 6 ? 8 : 4; // (HL) adds a memory read
         break;
     }
 
@@ -996,7 +996,7 @@ int execute_instruction(CPU_LR35902 &cpu)
         uint16_t total = static_cast<uint16_t>(a) + static_cast<uint16_t>(operand) + (get_flag(cpu, FLAG_C) ? 1u : 0u);
         apply_adc_flags(cpu, a, operand);
         cpu.af.reg8.high = static_cast<uint8_t>(total & 0xFF);
-        cycles = 4;
+        cycles = (opcode & 0x07) == 6 ? 8 : 4; // (HL) adds a memory read
         break;
     }
 
@@ -1014,7 +1014,7 @@ int execute_instruction(CPU_LR35902 &cpu)
         uint8_t result = static_cast<uint8_t>(a - operand);
         apply_sub_flags(cpu, a, operand, false, result);
         cpu.af.reg8.high = result;
-        cycles = 4;
+        cycles = (opcode & 0x07) == 6 ? 8 : 4; // (HL) adds a memory read
         break;
     }
 
@@ -1032,7 +1032,7 @@ int execute_instruction(CPU_LR35902 &cpu)
         uint8_t result = static_cast<uint8_t>(a - operand - (get_flag(cpu, FLAG_C) ? 1u : 0u));
         apply_sub_flags(cpu, a, operand, get_flag(cpu, FLAG_C), result);
         cpu.af.reg8.high = result;
-        cycles = 4;
+        cycles = (opcode & 0x07) == 6 ? 8 : 4; // (HL) adds a memory read
         break;
     }
 
@@ -1046,7 +1046,8 @@ int execute_instruction(CPU_LR35902 &cpu)
     case 0xA7:
         cpu.af.reg8.high = cpu.af.reg8.high & read_reg8(cpu, opcode & 0x07);
         apply_logic_flags(cpu, cpu.af.reg8.high, cpu.af.reg8.high == 0);
-        cycles = 4;
+        set_h_flag(cpu, true); // AND always sets H
+        cycles = (opcode & 0x07) == 6 ? 8 : 4; // (HL) adds a memory read
         break;
 
     case 0xA8:
@@ -1059,7 +1060,7 @@ int execute_instruction(CPU_LR35902 &cpu)
     case 0xAF:
         cpu.af.reg8.high = cpu.af.reg8.high ^ read_reg8(cpu, opcode & 0x07);
         apply_logic_flags(cpu, cpu.af.reg8.high, cpu.af.reg8.high == 0);
-        cycles = 4;
+        cycles = (opcode & 0x07) == 6 ? 8 : 4; // (HL) adds a memory read
         break;
 
     case 0xB0:
@@ -1072,7 +1073,7 @@ int execute_instruction(CPU_LR35902 &cpu)
     case 0xB7:
         cpu.af.reg8.high = cpu.af.reg8.high | read_reg8(cpu, opcode & 0x07);
         apply_logic_flags(cpu, cpu.af.reg8.high, cpu.af.reg8.high == 0);
-        cycles = 4;
+        cycles = (opcode & 0x07) == 6 ? 8 : 4; // (HL) adds a memory read
         break;
 
     case 0xB8:
@@ -1088,7 +1089,7 @@ int execute_instruction(CPU_LR35902 &cpu)
         uint8_t a = cpu.af.reg8.high;
         uint8_t result = a - operand;
         apply_sub_flags(cpu, a, operand, false, result);
-        cycles = 4;
+        cycles = (opcode & 0x07) == 6 ? 8 : 4; // (HL) adds a memory read
         break;
     }
 
@@ -1337,6 +1338,7 @@ int execute_instruction(CPU_LR35902 &cpu)
         uint8_t immediate = cpu_read(cpu, cpu.pc++);
         cpu.af.reg8.high &= immediate;
         apply_logic_flags(cpu, cpu.af.reg8.high, cpu.af.reg8.high == 0);
+        set_h_flag(cpu, true); // AND always sets H
         cycles = 8;
         break;
     }

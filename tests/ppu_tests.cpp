@@ -22,8 +22,8 @@ static void test_ppu_modes_scanlines_and_background()
     assert((cpu.memory[0xFF41] & 0x03) == 0);
     assert(!cpu.vram_locked);
     assert(!cpu.oam_locked);
-    assert(ppu.framebuffer[0] == 0xFF3A5F40);
-    assert(ppu.framebuffer[1] == 0xFF081820);
+    assert(ppu.framebuffer[0] == 0xFF88C070);
+    assert(ppu.framebuffer[1] == 0xFFE0F8D0);
 
     update_ppu(cpu, ppu, 203);
     assert(cpu.memory[0xFF44] == 1);
@@ -68,8 +68,8 @@ static void test_ppu_window_composition()
     cpu.memory[0x8011] = 0xFF; // Window tile color index 2
 
     update_ppu(cpu, ppu, 259);
-    assert(ppu.framebuffer[79] == 0xFF3A5F40);
-    assert(ppu.framebuffer[80] == 0xFF9BBC0F);
+    assert(ppu.framebuffer[79] == 0xFF88C070);
+    assert(ppu.framebuffer[80] == 0xFF346856);
 }
 
 static void test_ppu_sprite_priority_palettes_flips_and_8x16()
@@ -90,7 +90,7 @@ static void test_ppu_sprite_priority_palettes_flips_and_8x16()
     priority_cpu.memory[0xFE07] = 0x10;
 
     update_ppu(priority_cpu, priority_ppu, 268);
-    assert(priority_ppu.framebuffer[4] == 0xFFFFFFFF);
+    assert(priority_ppu.framebuffer[4] == 0xFF081820);
 
     CPU_LR35902 flip_cpu{};
     PPU_LR35902 flip_ppu{};
@@ -104,8 +104,8 @@ static void test_ppu_sprite_priority_palettes_flips_and_8x16()
     flip_cpu.memory[0xFE03] = 0x30; // OBJ palette 1 and horizontal flip
 
     update_ppu(flip_cpu, flip_ppu, 264);
-    assert(flip_ppu.framebuffer[0] == 0xFF081820);
-    assert(flip_ppu.framebuffer[7] == 0xFFFFFFFF);
+    assert(flip_ppu.framebuffer[0] == 0xFFE0F8D0);
+    assert(flip_ppu.framebuffer[7] == 0xFF081820);
 
     CPU_LR35902 tall_cpu{};
     PPU_LR35902 tall_ppu{};
@@ -120,7 +120,7 @@ static void test_ppu_sprite_priority_palettes_flips_and_8x16()
     tall_cpu.memory[0xFE03] = 0x40; // Vertical flip
 
     update_ppu(tall_cpu, tall_ppu, 264);
-    assert(tall_ppu.framebuffer[0] == 0xFF9BBC0F);
+    assert(tall_ppu.framebuffer[0] == 0xFF346856);
 
     CPU_LR35902 hidden_cpu{};
     PPU_LR35902 hidden_ppu{};
@@ -135,7 +135,7 @@ static void test_ppu_sprite_priority_palettes_flips_and_8x16()
     hidden_cpu.memory[0xFE03] = 0x80; // Behind nonzero background pixels
 
     update_ppu(hidden_cpu, hidden_ppu, 264);
-    assert(hidden_ppu.framebuffer[0] == 0xFF3A5F40);
+    assert(hidden_ppu.framebuffer[0] == 0xFF88C070);
 }
 
 static void test_stat_mode_interrupt_edges()

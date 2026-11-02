@@ -27,16 +27,17 @@ namespace
 
     std::uint32_t shade_color(std::uint8_t shade)
     {
+        // Shade 0 is the lightest colour on the DMG LCD.
         switch (shade)
         {
         case 0:
-            return 0xFF081820;
+            return 0xFFE0F8D0;
         case 1:
-            return 0xFF3A5F40;
+            return 0xFF88C070;
         case 2:
-            return 0xFF9BBC0F;
+            return 0xFF346856;
         default:
-            return 0xFFFFFFFF;
+            return 0xFF081820;
         }
     }
 
@@ -116,13 +117,21 @@ namespace
         return shade_color(shade);
     }
 
-    int calculate_mode3_duration(const CPU_LR35902 &cpu, int line)
+    // The window is drawn once LY has matched WY during the frame, while it is
+    // enabled and WX places it on screen.
+    bool window_visible(const CPU_LR35902 &cpu, const PPU_LR35902 &ppu)
+    {
+        const std::uint8_t lcdc = cpu.memory[LCDC];
+        return (lcdc & 0x01) != 0 && (lcdc & 0x20) != 0 && ppu.window_y_triggered &&
+               cpu.memory[WX] <= 166;
+    }
+
+    int calculate_mode3_duration(const CPU_LR35902 &cpu, const PPU_LR35902 &ppu, int line)
     {
         const std::uint8_t lcdc = cpu.memory[LCDC];
         int duration = 172 + (cpu.memory[SCX] & 0x07);
 
-        if ((lcdc & 0x01) != 0 && (lcdc & 0x20) != 0 &&
-            line >= cpu.memory[WY] && cpu.memory[WX] <= 166)
+        if (window_visible(cpu, ppu))
         {
             duration += 6;
         }
@@ -182,8 +191,7 @@ namespace
 
         const std::uint8_t lcdc = cpu.memory[LCDC];
         const bool background_enabled = (lcdc & 0x01) != 0;
-        const bool window_enabled = background_enabled && (lcdc & 0x20) != 0 &&
-                                    y >= cpu.memory[WY] && cpu.memory[WX] <= 166;
+        const bool window_enabled = window_visible(cpu, ppu);
         const int window_left = static_cast<int>(cpu.memory[WX]) - 7;
         const std::uint16_t background_map = (lcdc & 0x08) != 0 ? BG_MAP_1 : BG_MAP_0;
         const std::uint16_t window_map = (lcdc & 0x40) != 0 ? BG_MAP_1 : BG_MAP_0;
@@ -197,7 +205,7 @@ namespace
                 if (window_enabled && x >= window_left)
                 {
                     color_index = read_tile_pixel(cpu, lcdc, window_map,
-                                                  x - window_left, y - cpu.memory[WY]);
+                                                  x - window_left, ppu.window_line);
                 }
                 else
                 {
@@ -209,6 +217,11 @@ namespace
             background_pixels[static_cast<std::size_t>(x)] = color_index;
             ppu.framebuffer[static_cast<std::size_t>(y) * PPU_LR35902::WIDTH + x] =
                 palette_color(cpu, BGP, color_index);
+        }
+
+        if (window_enabled)
+        {
+            ++ppu.window_line; // Only lines that draw the window advance its line counter.
         }
 
         if ((lcdc & 0x02) == 0)
@@ -330,6 +343,11 @@ namespace
             // while the LY=LYC comparison is disabled. Mode 2 starts at dot 4.
             ppu.line_start_hold = true;
             ppu.ly_for_comparison = ly == 0 ? 0 : -1;
+            if (ly == 0)
+            {
+                ppu.window_y_triggered = false;
+                ppu.window_line = 0;
+            }
             update_status(cpu, ppu, 0);
         }
         else
@@ -375,6 +393,8 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         ppu.cycles_into_line = 0;
         cpu.memory[LY] = 0;
         ppu.ly_for_comparison = 0;
+        ppu.window_y_triggered = false;
+        ppu.window_line = 0;
         ppu.line_start_hold = false;
         if (ppu.has_started)
         {
@@ -441,7 +461,8 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         }
         else if (ppu.mode == 2)
         {
-            ppu.mode3_end = MODE3_START + calculate_mode3_duration(cpu, cpu.memory[LY]);
+            ppu.window_y_triggered = ppu.window_y_triggered || cpu.memory[LY] == cpu.memory[WY];
+            ppu.mode3_end = MODE3_START + calculate_mode3_duration(cpu, ppu, cpu.memory[LY]);
             update_status(cpu, ppu, 3);
         }
         else if (ppu.mode == 3 && ppu.cycles_into_line < ppu.mode3_end)
@@ -458,7 +479,8 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
             if (ppu.startup_mode0)
             {
                 ppu.startup_mode0 = false;
-                ppu.mode3_end = STARTUP_MODE3_START + calculate_mode3_duration(cpu, cpu.memory[LY]);
+                ppu.window_y_triggered = cpu.memory[LY] == cpu.memory[WY];
+                ppu.mode3_end = STARTUP_MODE3_START + calculate_mode3_duration(cpu, ppu, cpu.memory[LY]);
                 update_status(cpu, ppu, 3);
             }
             else if (ppu.line_start_hold)

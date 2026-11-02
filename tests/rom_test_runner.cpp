@@ -17,8 +17,11 @@ namespace
 
     void print_usage(const char *program_name)
     {
-        std::cerr << "Usage: " << program_name << " ROM_PATH [MAX_CYCLES] [dmg0|dmgABC|mgb|sgb|sgb2]\n"
-                  << "Runs a serial-reporting ROM test. Exit status: 0=Passed, 1=Failed, 2=no result.\n";
+        std::cerr << "Usage: " << program_name
+                  << " [--screenshot PPM_PATH] ROM_PATH [MAX_CYCLES] [dmg0|dmgABC|mgb|sgb|sgb2]\n"
+                  << "Runs a serial-reporting ROM test. Exit status: 0=Passed, 1=Failed, 2=no result.\n"
+                  << "With --screenshot, the frame is saved when the ROM executes LD B,B or the cycle\n"
+                  << "limit is reached, for screenshot tests such as dmg-acid2.\n";
     }
 
     bool parse_cycle_limit(const char *text, std::uint64_t &cycle_limit)
@@ -204,6 +207,37 @@ namespace
                cpu.hl.reg8.high == 0x42 && cpu.hl.reg8.low == 0x42;
     }
 
+    // Newer blargg tests report through cartridge RAM: a DE B0 61 signature at
+    // $A001, a status byte at $A000 ($80 while running), and text from $A004.
+    bool has_blargg_ram_signature(const CPU_LR35902 &cpu)
+    {
+        return cpu.cartridge_ram.size() >= 4 && cpu.cartridge_ram[1] == 0xDE &&
+               cpu.cartridge_ram[2] == 0xB0 && cpu.cartridge_ram[3] == 0x61;
+    }
+
+    std::string blargg_ram_text(const CPU_LR35902 &cpu)
+    {
+        std::string text;
+        for (std::size_t index = 4; index < cpu.cartridge_ram.size() && cpu.cartridge_ram[index] != 0; ++index)
+        {
+            text.push_back(static_cast<char>(cpu.cartridge_ram[index]));
+        }
+        return text;
+    }
+
+    bool write_screenshot(const PPU_LR35902 &ppu, const std::filesystem::path &path)
+    {
+        std::ofstream file(path, std::ios::binary);
+        file << "P6\n" << PPU_LR35902::WIDTH << ' ' << PPU_LR35902::HEIGHT << "\n255\n";
+        for (const std::uint32_t pixel : ppu.framebuffer)
+        {
+            const char rgb[] = {static_cast<char>(pixel >> 16), static_cast<char>(pixel >> 8),
+                                static_cast<char>(pixel)};
+            file.write(rgb, sizeof(rgb));
+        }
+        return static_cast<bool>(file);
+    }
+
     void print_failure_diagnostics(const CPU_LR35902 &cpu, std::uint64_t cycles_run)
     {
         std::cerr << "\nROM test failed after " << std::dec << cycles_run << " cycles"
@@ -235,6 +269,14 @@ namespace
 
 int main(int argc, char **argv)
 {
+    std::filesystem::path screenshot_path;
+    if (argc >= 3 && std::string(argv[1]) == "--screenshot")
+    {
+        screenshot_path = argv[2];
+        argv[2] = argv[0];
+        argv += 2;
+        argc -= 2;
+    }
     if (argc < 2 || argc > 4)
     {
         print_usage(argv[0]);
@@ -288,6 +330,7 @@ int main(int argc, char **argv)
         ppu.cycles_into_line = 108;
     }
     std::size_t output_written = 0;
+    bool blargg_ram_test_running = false;
     while (cycles_run < cycle_limit && !cpu.stopped)
     {
         const uint16_t pc_before = cpu.pc;
@@ -326,6 +369,11 @@ int main(int argc, char **argv)
             return 1;
         }
 
+        if (executed_ld_b_b && !screenshot_path.empty())
+        {
+            return write_screenshot(ppu, screenshot_path) ? 0 : 2;
+        }
+
         if (executed_ld_b_b && has_mooneye_pass_signature(cpu))
         {
             std::cout << "\nMooneye ROM test passed after " << cycles_run << " cycles.\n";
@@ -337,6 +385,32 @@ int main(int argc, char **argv)
             print_failure_diagnostics(cpu, cycles_run);
             return 1;
         }
+
+        if (has_blargg_ram_signature(cpu))
+        {
+            const std::uint8_t status = cpu.cartridge_ram[0];
+            if (status == 0x80)
+            {
+                blargg_ram_test_running = true;
+            }
+            else if (blargg_ram_test_running)
+            {
+                std::cout << blargg_ram_text(cpu);
+                if (status == 0)
+                {
+                    std::cout << "\nROM test passed after " << cycles_run << " cycles.\n";
+                    return 0;
+                }
+                std::cout << "\nROM test failed with code " << static_cast<unsigned>(status) << '\n';
+                print_failure_diagnostics(cpu, cycles_run);
+                return 1;
+            }
+        }
+    }
+
+    if (!screenshot_path.empty())
+    {
+        return write_screenshot(ppu, screenshot_path) ? 0 : 2;
     }
 
     std::cerr << "\nNo Passed/Failed serial marker after " << cycles_run << " cycles.\n"

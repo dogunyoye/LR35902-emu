@@ -55,7 +55,15 @@ Run a serial-reporting ROM test (for example, a CPU conformance ROM):
 ./build/rom_test_runner /path/to/test.gb [MAX_CYCLES]
 ```
 
-The runner prints serial output and returns 0 when it sees `Passed`, 1 for `Failed`, or 2 if neither marker appears before the cycle limit (default: 50,000,000).
+The runner prints serial output and returns 0 when it sees `Passed`, 1 for `Failed`, or 2 if neither marker appears before the cycle limit (default: 50,000,000). It also recognises Mooneye's `LD B,B` register signatures and blargg's cartridge-RAM status at `$A000`. Pass `--screenshot out.ppm` before the ROM path to save the frame for screenshot tests such as dmg-acid2.
+
+Run the Mooneye, blargg, and dmg-acid2 suites together (the ROMs are not included in this repository):
+
+```sh
+tests/run_rom_suites.sh --mooneye /path/to/mooneye-test-suite --blargg /path/to/gb-test-roms --acid2 /path/to/dmg-acid2
+```
+
+This writes per-ROM logs and `results.tsv` to `build/rom-results`. The dmg-acid2 comparison needs Python with Pillow.
 
 ### Debug builds
 
