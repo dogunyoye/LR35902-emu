@@ -20,7 +20,7 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | SB/SC serial transfer and serial interrupt | :white_check_mark: done |
 | Serial-output ROM test runner | :white_check_mark: done |
 | M-cycle bus timing: timers, OAM DMA, serial, and PPU advance with each CPU memory access | :white_check_mark: done |
-| Approximate variable mode-3 timing, BG/window/sprite rendering, VBlank and STAT interrupts | :white_check_mark: done |
+| Per-dot pixel FIFO rendering (mid-line register changes), variable mode-3 timing, VBlank and STAT interrupts | :white_check_mark: done |
 | Regression tests for CPU, timer, serial, interrupts, joypad, cartridge, memory, and PPU behavior | :white_check_mark: done |
 | CLI runner with cycle-driven cartridge support and keyboard controls | :white_check_mark: done |
 | Sub-M-cycle peripheral conformance (OAM corruption bug, DMA bus conflicts) | :soon: planned |
@@ -55,15 +55,16 @@ Run a serial-reporting ROM test (for example, a CPU conformance ROM):
 ./build/rom_test_runner /path/to/test.gb [MAX_CYCLES]
 ```
 
-The runner prints serial output and returns 0 when it sees `Passed`, 1 for `Failed`, or 2 if neither marker appears before the cycle limit (default: 50,000,000). It also recognises Mooneye's `LD B,B` register signatures and blargg's cartridge-RAM status at `$A000`. Pass `--screenshot out.ppm` before the ROM path to save the frame for screenshot tests such as dmg-acid2.
+The runner prints serial output and returns 0 when it sees `Passed`, 1 for `Failed`, or 2 if neither marker appears before the cycle limit (default: 50,000,000). It also recognises Mooneye's `LD B,B` register signatures and blargg's cartridge-RAM status at `$A000`. Pass `--screenshot out.ppm` before the ROM path to save the frame for screenshot tests such as dmg-acid2 and Mealybug Tearoom.
 
-Run the Mooneye, blargg, and dmg-acid2 suites together (the ROMs are not included in this repository):
+Run the Mooneye, blargg, dmg-acid2, and Mealybug Tearoom suites together (the ROMs are not included in this repository):
 
 ```sh
-tests/run_rom_suites.sh --mooneye /path/to/mooneye-test-suite --blargg /path/to/gb-test-roms --acid2 /path/to/dmg-acid2
+tests/run_rom_suites.sh --mooneye /path/to/mooneye-test-suite --blargg /path/to/gb-test-roms \
+    --acid2 /path/to/dmg-acid2 --mealybug /path/to/mealybug-tearoom-tests
 ```
 
-This writes per-ROM logs and `results.tsv` to `build/rom-results`. The dmg-acid2 comparison needs Python with Pillow.
+This writes per-ROM logs and `results.tsv` to `build/rom-results`. The screenshot comparisons need Python with Pillow.
 
 ### Debug builds
 

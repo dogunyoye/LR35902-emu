@@ -243,6 +243,24 @@ static void test_variable_mode3_timing()
     assert(sprite_cpu.memory[0xFF44] == 1);
 }
 
+static void test_mid_line_palette_change()
+{
+    CPU_LR35902 cpu{};
+    PPU_LR35902 ppu{};
+    cpu.memory[0xFF40] = 0x91;
+    cpu.memory[0xFF47] = 0xE4;
+    cpu.memory[0x8000] = 0xFF; // Every background pixel on line 0 is color index 1
+
+    // Pixels are coloured from dot 95 onwards, one per dot, so this colours
+    // pixels 0-79 before the palette changes.
+    update_ppu(cpu, ppu, 175);
+    cpu.memory[0xFF47] = 0xE0; // Color index 1 becomes shade 0
+    update_ppu(cpu, ppu, 456 - 175);
+    assert(ppu.framebuffer[79] == 0xFF88C070);
+    assert(ppu.framebuffer[81] == 0xFFE0F8D0);
+    assert(ppu.framebuffer[159] == 0xFFE0F8D0);
+}
+
 int main()
 {
     test_ppu_modes_scanlines_and_background();
@@ -251,5 +269,6 @@ int main()
     test_stat_mode_interrupt_edges();
     test_stat_lyc_interrupt_edges();
     test_variable_mode3_timing();
+    test_mid_line_palette_change();
     return 0;
 }

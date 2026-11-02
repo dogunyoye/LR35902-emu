@@ -51,6 +51,43 @@ namespace
         }
     }
 
+    // The DMG and MGB boot ROMs leave the Nintendo logo from the cartridge
+    // header and a registered-trademark tile in VRAM, and the logo in the
+    // background map. Each logo bit is doubled horizontally and vertically.
+    void load_boot_logo(CPU_LR35902 &cpu)
+    {
+        constexpr std::array<uint8_t, 8> TRADEMARK_TILE = {0x3C, 0x42, 0xB9, 0xA5, 0xB9, 0xA5, 0x42, 0x3C};
+        std::size_t address = 0x8010;
+        for (std::size_t index = 0; index < 0x30; ++index)
+        {
+            const uint8_t logo_byte = cpu.cartridge_rom[LOGO_ADDRESS + index];
+            for (const int shift : {4, 0})
+            {
+                uint8_t doubled = 0;
+                for (int bit = 3; bit >= 0; --bit)
+                {
+                    const uint8_t pixel = (logo_byte >> (shift + bit)) & 0x01;
+                    doubled = static_cast<uint8_t>((doubled << 2) | (pixel * 0x03));
+                }
+                cpu.memory[address] = doubled;
+                cpu.memory[address + 2] = doubled;
+                address += 4;
+            }
+        }
+        for (const uint8_t row : TRADEMARK_TILE)
+        {
+            cpu.memory[address] = row;
+            address += 2;
+        }
+
+        cpu.memory[0x9910] = 0x19;
+        for (uint8_t tile = 1; tile <= 0x0C; ++tile)
+        {
+            cpu.memory[0x9903 + tile] = tile;
+            cpu.memory[0x9923 + tile] = static_cast<uint8_t>(tile + 0x0C);
+        }
+    }
+
     // MBC1 multicarts are wired differently but share the normal MBC1 header.
     // Like other emulators, detect them as 8 Mbit ROMs whose second 2 Mbit
     // game also starts with a cartridge header logo.
@@ -188,6 +225,10 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     cpu.memory[0xFF4A] = 0x00;
     cpu.memory[0xFF4B] = 0x00;
     cpu.memory[0xFF50] = 0xFF;
+    if (model != GameBoyModel::Sgb && model != GameBoyModel::Sgb2)
+    {
+        load_boot_logo(cpu);
+    }
     switch (model)
     {
     case GameBoyModel::Dmg0:

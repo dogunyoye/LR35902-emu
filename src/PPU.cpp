@@ -67,10 +67,10 @@ namespace
         // mode 2, and the mode 0 interrupt one dot before STAT reports mode 0.
         const bool mode0_line = mode == 0 ||
                                 (mode == 3 && ppu.cycles_into_line >= ppu.mode3_end - 1);
-        const bool mode2_line = mode == 2 || ppu.line_start_hold;
+        const bool mode2_line = mode == 2 || (ppu.line_start_hold && cpu.memory[LY] != 0);
         const bool stat_line = ppu.lcd_enabled &&
                                ((mode0_line && (stat & 0x08) != 0) ||
-                                ((mode == 1) && (stat & 0x10) != 0) ||
+                                ((mode == 1) && (stat & 0x10) != 0 && (cpu.memory[LY] != 144 || ppu.cycles_into_line >= 4)) ||
                                 (mode2_line && (stat & 0x20) != 0) ||
                                 ((stat & 0x44) == 0x44));
         if (stat_line && !ppu.stat_interrupt_line)
@@ -78,32 +78,6 @@ namespace
             cpu.memory[0xFF0F] |= 0x02;
         }
         ppu.stat_interrupt_line = stat_line;
-    }
-
-    std::uint8_t read_tile_pixel(const CPU_LR35902 &cpu, std::uint8_t lcdc,
-                                 std::uint16_t map_base, int pixel_x, int pixel_y)
-    {
-        const std::uint8_t world_x = static_cast<std::uint8_t>(pixel_x);
-        const std::uint8_t world_y = static_cast<std::uint8_t>(pixel_y);
-        const std::uint16_t map_offset = static_cast<std::uint16_t>((world_y / 8) * 32 + world_x / 8);
-        const std::uint8_t tile_id = cpu.memory[map_base + map_offset];
-
-        std::uint16_t tile_base;
-        if ((lcdc & 0x10) != 0)
-        {
-            tile_base = static_cast<std::uint16_t>(VRAM_START + tile_id * 16);
-        }
-        else
-        {
-            const int signed_tile_id = tile_id < 0x80 ? tile_id : static_cast<int>(tile_id) - 0x100;
-            tile_base = static_cast<std::uint16_t>(0x9000 + signed_tile_id * 16);
-        }
-
-        const std::uint16_t row_address = static_cast<std::uint16_t>(tile_base + (world_y & 0x07) * 2);
-        const std::uint8_t bit = static_cast<std::uint8_t>(1u << (7 - (world_x & 0x07)));
-        return static_cast<std::uint8_t>(
-            ((cpu.memory[row_address] & bit) != 0 ? 1 : 0) |
-            ((cpu.memory[row_address + 1] & bit) != 0 ? 2 : 0));
     }
 
     std::uint32_t palette_color(const CPU_LR35902 &cpu, std::uint16_t palette_address, std::uint8_t color_index)
@@ -122,201 +96,319 @@ namespace
                cpu.memory[WX] <= 166;
     }
 
-    int calculate_mode3_duration(const CPU_LR35902 &cpu, const PPU_LR35902 &ppu, int line)
+    // OAM scan: the first ten objects overlapping this line, in OAM order.
+    void scan_line_objects(const CPU_LR35902 &cpu, PPU_LR35902 &ppu, int line)
     {
-        const std::uint8_t lcdc = cpu.memory[LCDC];
-        int duration = 172 + (cpu.memory[SCX] & 0x07);
+        const int object_height = (cpu.memory[LCDC] & 0x04) != 0 ? 16 : 8;
+        ppu.line_object_count = 0;
+        for (std::uint8_t index = 0; index < 40 && ppu.line_object_count < 10; ++index)
+        {
+            const std::uint16_t address = static_cast<std::uint16_t>(OAM_START + index * 4);
+            const int top = static_cast<int>(cpu.memory[address]) - 16;
+            if (line >= top && line < top + object_height)
+            {
+                ppu.line_objects[static_cast<std::size_t>(ppu.line_object_count++)] = {
+                    index, cpu.memory[address + 1], cpu.memory[address], false};
+            }
+        }
+    }
 
+    // Dots an object fetch stalls mode 3. The first object in a background tile
+    // also waits for that tile's fetch to finish; X=0 objects sit in the tile
+    // left of the screen.
+    int object_penalty(const CPU_LR35902 &cpu, std::array<bool, 32> &penalised_tiles, std::uint8_t object_x)
+    {
+        const std::uint8_t world_x = static_cast<std::uint8_t>(object_x - 8 + cpu.memory[SCX]);
+        const std::size_t tile = world_x / 8;
+        if (penalised_tiles[tile])
+        {
+            return 6;
+        }
+        penalised_tiles[tile] = true;
+        return 6 + std::max(0, 5 - (world_x & 0x07));
+    }
+
+    // Objects are fetched from left to right, ties in OAM order.
+    int next_object(const PPU_LR35902 &ppu)
+    {
+        int next = -1;
+        for (int index = 0; index < ppu.line_object_count; ++index)
+        {
+            const PPU_LR35902::LineObject &object = ppu.line_objects[static_cast<std::size_t>(index)];
+            if (!object.fetched && object.x < 168 &&
+                (next < 0 || object.x < ppu.line_objects[static_cast<std::size_t>(next)].x))
+            {
+                next = index;
+            }
+        }
+        return next;
+    }
+
+    int calculate_mode3_duration(const CPU_LR35902 &cpu, const PPU_LR35902 &ppu)
+    {
+        int duration = 172 + (cpu.memory[SCX] & 0x07);
         if (window_visible(cpu, ppu))
         {
             duration += 6;
         }
 
-        if ((lcdc & 0x02) != 0)
+        if ((cpu.memory[LCDC] & 0x02) != 0)
         {
-            const int sprite_height = (lcdc & 0x04) != 0 ? 16 : 8;
-            std::array<std::uint8_t, 10> selected_sprites{};
-            std::size_t selected_count = 0;
-            for (std::uint8_t index = 0; index < 40 && selected_count < selected_sprites.size(); ++index)
+            PPU_LR35902 scan = ppu;
+            std::array<bool, 32> penalised_tiles{};
+            for (int index = next_object(scan); index >= 0; index = next_object(scan))
             {
-                const std::uint16_t address = static_cast<std::uint16_t>(OAM_START + index * 4);
-                const int top = static_cast<int>(cpu.memory[address]) - 16;
-                if (line < top || line >= top + sprite_height)
-                {
-                    continue;
-                }
-
-                selected_sprites[selected_count++] = cpu.memory[address + 1];
-            }
-
-            std::sort(selected_sprites.begin(), selected_sprites.begin() + selected_count);
-            std::array<bool, 32> fetched_background_tiles{};
-            for (std::size_t index = 0; index < selected_count; ++index)
-            {
-                const int sprite_x = selected_sprites[index];
-                if (sprite_x >= 168)
-                {
-                    continue;
-                }
-
-                // Sprites at X=0 sit in the background tile left of the screen.
-                const std::uint8_t world_x = static_cast<std::uint8_t>(sprite_x - 8 + cpu.memory[SCX]);
-                const int alignment = world_x & 0x07;
-                const std::size_t tile = world_x / 8;
-                if (fetched_background_tiles[tile])
-                {
-                    duration += 6;
-                    continue;
-                }
-
-                fetched_background_tiles[tile] = true;
-                duration += 6 + std::max(0, 5 - alignment);
+                PPU_LR35902::LineObject &object = scan.line_objects[static_cast<std::size_t>(index)];
+                object.fetched = true;
+                duration += object_penalty(cpu, penalised_tiles, object.x);
             }
         }
-
         return duration;
     }
 
-    void render_scanline(const CPU_LR35902 &cpu, PPU_LR35902 &ppu)
+    void start_pixel_pipeline(const CPU_LR35902 &cpu, PPU_LR35902 &ppu)
     {
-        const int y = cpu.memory[LY];
-        if (y >= PPU_LR35902::HEIGHT)
+        ppu.fetch_step = 0;
+        ppu.fetch_tile_x = 0;
+        ppu.fetch_window = false;
+        ppu.fetch_first_tile = true;
+        ppu.background_count = 0;
+        ppu.object_colors.fill(0);
+        ppu.pixel_x = 0;
+        ppu.discard_pixels = cpu.memory[SCX] & 0x07; // Only read as the line starts.
+        ppu.stall_dots = 0;
+        ppu.stalled_object = -1;
+        ppu.window_active = false;
+        ppu.window_drawn = false;
+        ppu.penalised_tiles.fill(false);
+        ppu.pending_pixels = {};
+        ppu.drawing = true;
+        ppu.bgp_write_pending = false;
+    }
+
+    std::uint16_t tile_row_address(const CPU_LR35902 &cpu, std::uint8_t tile_id, int row)
+    {
+        if ((cpu.memory[LCDC] & 0x10) != 0)
         {
+            return static_cast<std::uint16_t>(VRAM_START + tile_id * 16 + row * 2);
+        }
+        return static_cast<std::uint16_t>(0x9000 + static_cast<std::int8_t>(tile_id) * 16 + row * 2);
+    }
+
+    int fetch_row(const CPU_LR35902 &cpu, const PPU_LR35902 &ppu)
+    {
+        return ppu.fetch_window ? ppu.window_line & 0x07 : (cpu.memory[LY] + cpu.memory[SCY]) & 0x07;
+    }
+
+    // One dot of the background fetcher. Registers are read at the stage that
+    // uses them, so mid-line writes affect the tiles fetched afterwards.
+    void advance_fetcher(const CPU_LR35902 &cpu, PPU_LR35902 &ppu)
+    {
+        const std::uint8_t lcdc = cpu.memory[LCDC];
+        switch (ppu.fetch_step)
+        {
+        case 1:
+            if (ppu.fetch_window)
+            {
+                const std::uint16_t map = (lcdc & 0x40) != 0 ? BG_MAP_1 : BG_MAP_0;
+                ppu.fetch_tile_id = cpu.memory[map + (ppu.window_line / 8) * 32 + (ppu.fetch_tile_x & 0x1F)];
+            }
+            else
+            {
+                const std::uint16_t map = (lcdc & 0x08) != 0 ? BG_MAP_1 : BG_MAP_0;
+                const int column = ((cpu.memory[SCX] >> 3) + ppu.fetch_tile_x) & 0x1F;
+                const int row = ((cpu.memory[LY] + cpu.memory[SCY]) & 0xFF) / 8;
+                ppu.fetch_tile_id = cpu.memory[map + row * 32 + column];
+            }
+            break;
+        case 3:
+            ppu.fetch_low = cpu.memory[tile_row_address(cpu, ppu.fetch_tile_id, fetch_row(cpu, ppu))];
+            break;
+        case 5:
+            ppu.fetch_high = cpu.memory[tile_row_address(cpu, ppu.fetch_tile_id, fetch_row(cpu, ppu)) + 1];
+            if (ppu.fetch_first_tile)
+            {
+                // The first fetch of a line is thrown away and repeated.
+                ppu.fetch_first_tile = false;
+                ppu.fetch_step = 0;
+                return;
+            }
+            break;
+        case 6:
+            if (ppu.background_count == 0)
+            {
+                ppu.background_low = ppu.fetch_low;
+                ppu.background_high = ppu.fetch_high;
+                ppu.background_count = 8;
+                ++ppu.fetch_tile_x;
+                ppu.fetch_step = 0;
+            }
+            return;
+        default:
+            break;
+        }
+        ++ppu.fetch_step;
+    }
+
+    void load_object(const CPU_LR35902 &cpu, PPU_LR35902 &ppu, int index)
+    {
+        PPU_LR35902::LineObject &object = ppu.line_objects[static_cast<std::size_t>(index)];
+        object.fetched = true;
+        const std::uint16_t address = static_cast<std::uint16_t>(OAM_START + object.oam_index * 4);
+        const std::uint8_t attributes = cpu.memory[address + 3];
+        const int object_height = (cpu.memory[LCDC] & 0x04) != 0 ? 16 : 8;
+        int row = cpu.memory[LY] - (object.y - 16);
+        if ((attributes & 0x40) != 0)
+        {
+            row = object_height - 1 - row;
+        }
+        int tile = cpu.memory[address + 2];
+        if (object_height == 16)
+        {
+            tile = (tile & 0xFE) + row / 8;
+        }
+        row &= 0x07;
+        const std::uint16_t row_address = static_cast<std::uint16_t>(VRAM_START + tile * 16 + row * 2);
+        const std::uint8_t low = cpu.memory[row_address];
+        const std::uint8_t high = cpu.memory[row_address + 1];
+
+        for (int column = 0; column < 8; ++column)
+        {
+            const int slot = object.x - 8 + column - ppu.pixel_x;
+            if (slot < 0 || slot >= 8 || ppu.object_colors[static_cast<std::size_t>(slot)] != 0)
+            {
+                continue; // Earlier objects keep their opaque pixels.
+            }
+            const int bit = (attributes & 0x20) != 0 ? column : 7 - column;
+            const std::uint8_t color = static_cast<std::uint8_t>(((low >> bit) & 1) | (((high >> bit) & 1) << 1));
+            ppu.object_colors[static_cast<std::size_t>(slot)] = color;
+            ppu.object_attributes[static_cast<std::size_t>(slot)] = attributes;
+        }
+    }
+
+    // Pops the next pixel from the shifters. It is coloured two dots later.
+    PPU_LR35902::PendingPixel output_pixel(PPU_LR35902 &ppu)
+    {
+        const std::uint8_t background_color = static_cast<std::uint8_t>(
+            ((ppu.background_high >> 7) << 1) | (ppu.background_low >> 7));
+        ppu.background_low = static_cast<std::uint8_t>(ppu.background_low << 1);
+        ppu.background_high = static_cast<std::uint8_t>(ppu.background_high << 1);
+        --ppu.background_count;
+        if (ppu.discard_pixels > 0)
+        {
+            --ppu.discard_pixels;
+            return {};
+        }
+
+        const PPU_LR35902::PendingPixel pixel{true, static_cast<std::uint8_t>(ppu.pixel_x), background_color,
+                                              ppu.object_colors[0], ppu.object_attributes[0]};
+        std::copy(ppu.object_colors.begin() + 1, ppu.object_colors.end(), ppu.object_colors.begin());
+        std::copy(ppu.object_attributes.begin() + 1, ppu.object_attributes.end(), ppu.object_attributes.begin());
+        ppu.object_colors[7] = 0;
+        ++ppu.pixel_x;
+        return pixel;
+    }
+
+    // Palettes and the enable bits are read as each pixel is coloured.
+    void resolve_pixel(const CPU_LR35902 &cpu, PPU_LR35902 &ppu, const PPU_LR35902::PendingPixel &pixel)
+    {
+        const std::uint8_t lcdc = cpu.memory[LCDC];
+        const std::uint8_t visible_background = (lcdc & 0x01) != 0 ? pixel.background_color : 0;
+        const std::uint8_t bgp = ppu.bgp_write_pending ? ppu.bgp_write_blend : cpu.memory[BGP];
+        ppu.bgp_write_pending = false;
+        std::uint32_t color = shade_color(static_cast<std::uint8_t>((bgp >> (visible_background * 2)) & 0x03));
+        if (pixel.object_color != 0 && (lcdc & 0x02) != 0 &&
+            ((pixel.object_attributes & 0x80) == 0 || visible_background == 0))
+        {
+            color = palette_color(cpu, (pixel.object_attributes & 0x10) != 0 ? OBP1 : OBP0, pixel.object_color);
+        }
+        ppu.framebuffer[static_cast<std::size_t>(cpu.memory[LY]) * PPU_LR35902::WIDTH + pixel.x] = color;
+    }
+
+    void advance_pixel_pipeline(const CPU_LR35902 &cpu, PPU_LR35902 &ppu)
+    {
+        if (!ppu.drawing)
+        {
+            return;
+        }
+        if (ppu.pending_pixels[1].valid)
+        {
+            resolve_pixel(cpu, ppu, ppu.pending_pixels[1]);
+        }
+        ppu.pending_pixels[1] = ppu.pending_pixels[0];
+        ppu.pending_pixels[0] = {};
+        if (ppu.pixel_x >= PPU_LR35902::WIDTH)
+        {
+            if (!ppu.pending_pixels[1].valid)
+            {
+                ppu.drawing = false;
+                if (ppu.window_drawn)
+                {
+                    ++ppu.window_line; // Only lines that draw the window advance its line counter.
+                }
+            }
             return;
         }
 
         const std::uint8_t lcdc = cpu.memory[LCDC];
-        const bool background_enabled = (lcdc & 0x01) != 0;
-        const bool window_enabled = window_visible(cpu, ppu);
-        const int window_left = static_cast<int>(cpu.memory[WX]) - 7;
-        const std::uint16_t background_map = (lcdc & 0x08) != 0 ? BG_MAP_1 : BG_MAP_0;
-        const std::uint16_t window_map = (lcdc & 0x40) != 0 ? BG_MAP_1 : BG_MAP_0;
-        std::array<std::uint8_t, PPU_LR35902::WIDTH> background_pixels{};
+        advance_fetcher(cpu, ppu);
 
-        for (int x = 0; x < PPU_LR35902::WIDTH; ++x)
+        if (!ppu.window_active && ppu.stall_dots == 0 && ppu.background_count > 0 && ppu.discard_pixels == 0 &&
+            (lcdc & 0x20) != 0 && ppu.window_y_triggered && cpu.memory[WX] <= 166 &&
+            ppu.pixel_x + 7 >= cpu.memory[WX])
         {
-            std::uint8_t color_index = 0;
-            if (background_enabled)
-            {
-                if (window_enabled && x >= window_left)
-                {
-                    color_index = read_tile_pixel(cpu, lcdc, window_map,
-                                                  x - window_left, ppu.window_line);
-                }
-                else
-                {
-                    color_index = read_tile_pixel(cpu, lcdc, background_map,
-                                                  x + cpu.memory[SCX], y + cpu.memory[SCY]);
-                }
-            }
-
-            background_pixels[static_cast<std::size_t>(x)] = color_index;
-            ppu.framebuffer[static_cast<std::size_t>(y) * PPU_LR35902::WIDTH + x] =
-                palette_color(cpu, BGP, color_index);
-        }
-
-        if (window_enabled)
-        {
-            ++ppu.window_line; // Only lines that draw the window advance its line counter.
-        }
-
-        if ((lcdc & 0x02) == 0)
-        {
+            // Starting the window clears the background shifter and restarts
+            // the fetcher on the window's first tile, beginning this dot.
+            ppu.window_active = true;
+            ppu.window_drawn = true;
+            ppu.fetch_window = true;
+            ppu.fetch_tile_x = 0;
+            ppu.fetch_step = 1;
+            ppu.background_count = 0;
             return;
         }
 
-        struct Sprite
+        if (ppu.stall_dots == 0 && ppu.discard_pixels == 0 && ppu.background_count > 0 && (lcdc & 0x02) != 0)
         {
-            int left;
-            int top;
-            std::uint8_t tile;
-            std::uint8_t attributes;
-            std::uint8_t oam_index;
-        };
-
-        std::array<Sprite, 10> selected_sprites{};
-        std::size_t selected_count = 0;
-        const int sprite_height = (lcdc & 0x04) != 0 ? 16 : 8;
-        for (std::uint8_t index = 0; index < 40 && selected_count < selected_sprites.size(); ++index)
-        {
-            const std::uint16_t address = static_cast<std::uint16_t>(OAM_START + index * 4);
-            const int top = static_cast<int>(cpu.memory[address]) - 16;
-            if (y < top || y >= top + sprite_height)
+            const int index = next_object(ppu);
+            if (index >= 0 && ppu.line_objects[static_cast<std::size_t>(index)].x <= ppu.pixel_x + 8)
             {
-                continue;
+                ppu.stalled_object = index;
+                ppu.stall_dots = object_penalty(cpu, ppu.penalised_tiles,
+                                                ppu.line_objects[static_cast<std::size_t>(index)].x);
             }
-
-            selected_sprites[selected_count++] = {
-                static_cast<int>(cpu.memory[address + 1]) - 8,
-                top,
-                cpu.memory[address + 2],
-                cpu.memory[address + 3],
-                index};
         }
 
-        std::sort(selected_sprites.begin(), selected_sprites.begin() + selected_count,
-                  [](const Sprite &left, const Sprite &right)
-                  {
-                      return left.left != right.left ? left.left < right.left
-                                                     : left.oam_index < right.oam_index;
-                  });
-
-        std::array<bool, PPU_LR35902::WIDTH> sprite_pixels_claimed{};
-        for (std::size_t sprite_index = 0; sprite_index < selected_count; ++sprite_index)
+        if (ppu.stall_dots > 0)
         {
-            const Sprite &sprite = selected_sprites[sprite_index];
-
-            int tile_row = y - sprite.top;
-            if ((sprite.attributes & 0x40) != 0)
+            if (--ppu.stall_dots == 0)
             {
-                tile_row = sprite_height - 1 - tile_row;
+                load_object(cpu, ppu, ppu.stalled_object);
+                ppu.stalled_object = -1;
             }
+            return;
+        }
 
-            int tile_index = sprite.tile;
-            if (sprite_height == 16)
-            {
-                tile_index &= 0xFE;
-                tile_index += tile_row / 8;
-                tile_row %= 8;
-            }
+        if (ppu.background_count > 0)
+        {
+            ppu.pending_pixels[0] = output_pixel(ppu);
+        }
+    }
 
-            const std::uint16_t row_address = static_cast<std::uint16_t>(
-                VRAM_START + tile_index * 16 + tile_row * 2);
-            for (int pixel_x = 0; pixel_x < 8; ++pixel_x)
-            {
-                const int screen_x = sprite.left + pixel_x;
-                if (screen_x < 0 || screen_x >= PPU_LR35902::WIDTH ||
-                    sprite_pixels_claimed[static_cast<std::size_t>(screen_x)])
-                {
-                    continue;
-                }
-
-                const int bit_index = (sprite.attributes & 0x20) != 0 ? pixel_x : 7 - pixel_x;
-                const std::uint8_t bit = static_cast<std::uint8_t>(1u << bit_index);
-                const std::uint8_t color_index = static_cast<std::uint8_t>(
-                    ((cpu.memory[row_address] & bit) != 0 ? 1 : 0) |
-                    ((cpu.memory[row_address + 1] & bit) != 0 ? 2 : 0));
-                if (color_index == 0)
-                {
-                    continue;
-                }
-
-                sprite_pixels_claimed[static_cast<std::size_t>(screen_x)] = true;
-                const bool behind_background = (sprite.attributes & 0x80) != 0;
-                if (behind_background && background_pixels[static_cast<std::size_t>(screen_x)] != 0)
-                {
-                    continue;
-                }
-
-                const std::uint16_t palette_address = (sprite.attributes & 0x10) != 0 ? OBP1 : OBP0;
-                ppu.framebuffer[static_cast<std::size_t>(y) * PPU_LR35902::WIDTH + screen_x] =
-                    palette_color(cpu, palette_address, color_index);
-            }
+    // Draws any pixels the pipeline has not reached by the end of the line,
+    // which can happen when registers change mid-line.
+    void finish_pixel_pipeline(const CPU_LR35902 &cpu, PPU_LR35902 &ppu)
+    {
+        while (ppu.drawing)
+        {
+            ppu.stall_dots = std::min(ppu.stall_dots, 1);
+            advance_pixel_pipeline(cpu, ppu);
         }
     }
 
     void advance_scanline(CPU_LR35902 &cpu, PPU_LR35902 &ppu)
     {
+        finish_pixel_pipeline(cpu, ppu);
         std::uint8_t ly = cpu.memory[LY];
         ly = ly == 153 ? 0 : static_cast<std::uint8_t>(ly + 1);
         cpu.memory[LY] = ly;
@@ -370,6 +462,7 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
             std::fill(ppu.framebuffer.begin(), ppu.framebuffer.end(), shade_color(0));
         }
         ppu.lcd_enabled = false;
+        ppu.drawing = false;
         ppu.startup_mode0 = false;
         ppu.line_start_hold = false;
         ppu.ly_for_comparison = 0;
@@ -437,11 +530,16 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         }
         else
         {
-            mode_boundary = 456;
+            // The mode 1 interrupt is raised four dots into line 144.
+            mode_boundary = cpu.memory[LY] == 144 && ppu.cycles_into_line < 4 ? 4 : 456;
         }
 
         const int step = std::min(cycles, mode_boundary - ppu.cycles_into_line);
-        ppu.cycles_into_line += step;
+        for (int dot = 0; dot < step; ++dot)
+        {
+            advance_pixel_pipeline(cpu, ppu);
+            ++ppu.cycles_into_line;
+        }
         cycles -= step;
 
         if (ppu.cycles_into_line != mode_boundary)
@@ -456,7 +554,9 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         else if (ppu.mode == 2)
         {
             ppu.window_y_triggered = ppu.window_y_triggered || cpu.memory[LY] == cpu.memory[WY];
-            ppu.mode3_end = MODE3_START + calculate_mode3_duration(cpu, ppu, cpu.memory[LY]);
+            scan_line_objects(cpu, ppu, cpu.memory[LY]);
+            ppu.mode3_end = MODE3_START + calculate_mode3_duration(cpu, ppu);
+            start_pixel_pipeline(cpu, ppu);
             update_status(cpu, ppu, 3);
         }
         else if (ppu.mode == 3 && ppu.cycles_into_line < ppu.mode3_end)
@@ -465,7 +565,6 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         }
         else if (ppu.mode == 3)
         {
-            render_scanline(cpu, ppu);
             update_status(cpu, ppu, 0);
         }
         else if (ppu.mode == 0)
@@ -474,7 +573,9 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
             {
                 ppu.startup_mode0 = false;
                 ppu.window_y_triggered = cpu.memory[LY] == cpu.memory[WY];
-                ppu.mode3_end = STARTUP_MODE3_START + calculate_mode3_duration(cpu, ppu, cpu.memory[LY]);
+                scan_line_objects(cpu, ppu, cpu.memory[LY]);
+                ppu.mode3_end = STARTUP_MODE3_START + calculate_mode3_duration(cpu, ppu);
+                start_pixel_pipeline(cpu, ppu);
                 update_status(cpu, ppu, 3);
             }
             else if (ppu.line_start_hold)
@@ -487,6 +588,10 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
             {
                 advance_scanline(cpu, ppu);
             }
+        }
+        else if (ppu.cycles_into_line < 456)
+        {
+            update_status(cpu, ppu, 1);
         }
         else
         {

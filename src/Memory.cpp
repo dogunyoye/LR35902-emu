@@ -301,6 +301,12 @@ namespace
             return;
         }
 
+        if (address == 0xFF47 && cpu.ppu != nullptr)
+        {
+            cpu.ppu->bgp_write_pending = true;
+            cpu.ppu->bgp_write_blend = static_cast<uint8_t>(cpu.memory[address] | value);
+        }
+
         if (address == JOYP_REG)
         {
             const uint8_t old_lines = joypad_lines(cpu);

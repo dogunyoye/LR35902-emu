@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
-# Run the Mooneye, blargg, and dmg-acid2 test ROMs through rom_test_runner.
+# Run the Mooneye, blargg, dmg-acid2, and Mealybug Tearoom test ROMs through rom_test_runner.
 #
-# Usage: tests/run_rom_suites.sh [-o OUTPUT_DIR] [--mooneye DIR] [--blargg DIR] [--acid2 DIR]
-#   --mooneye DIR  extracted mooneye-test-suite release (contains acceptance/)
-#   --blargg DIR   gb-test-roms checkout (contains cpu_instrs/)
-#   --acid2 DIR    dmg-acid2 checkout with dmg-acid2.gb built or downloaded into it
+# Usage: tests/run_rom_suites.sh [-o OUTPUT_DIR] [--mooneye DIR] [--blargg DIR] [--acid2 DIR] [--mealybug DIR]
+#   --mooneye DIR   extracted mooneye-test-suite release (contains acceptance/)
+#   --blargg DIR    gb-test-roms checkout (contains cpu_instrs/)
+#   --acid2 DIR     dmg-acid2 checkout with dmg-acid2.gb built or downloaded into it
+#   --mealybug DIR  mealybug-tearoom-tests checkout (its ROM zip is unpacked into OUTPUT_DIR)
 # Writes one log per ROM and results.tsv to OUTPUT_DIR (default: build/rom-results).
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 RUNNER=${RUNNER:-$ROOT/build/rom_test_runner}
 out=$ROOT/build/rom-results
-mooneye= blargg= acid2=
+mooneye= blargg= acid2= mealybug=
 while [ $# -gt 0 ]; do
   case $1 in
     -o) out=$2; shift 2 ;;
     --mooneye) mooneye=$2; shift 2 ;;
     --blargg) blargg=$2; shift 2 ;;
     --acid2) acid2=$2; shift 2 ;;
+    --mealybug) mealybug=$2; shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -60,11 +62,26 @@ export RUNNER out
   fi
   if [ -n "$acid2" ]; then
     if "$RUNNER" --screenshot "$out/dmg-acid2.ppm" "$acid2/dmg-acid2.gb" 20000000 >"$out/dmg-acid2.log" 2>&1 &&
-       python3 "$ROOT/tests/compare_acid2.py" "$out/dmg-acid2.ppm" "$acid2/img/reference-dmg.png" >>"$out/dmg-acid2.log" 2>&1; then
+       python3 "$ROOT/tests/compare_screenshot.py" "$out/dmg-acid2.ppm" "$acid2/img/reference-dmg.png" >>"$out/dmg-acid2.log" 2>&1; then
       printf 'PASS\tacid2\tdmg-acid2.gb\n'
     else
       printf 'FAIL\tacid2\tdmg-acid2.gb\n'
     fi
+  fi
+  if [ -n "$mealybug" ]; then
+    # Screenshot tests compared against the DMG reference images.
+    unzip -o -q "$mealybug/mealybug-tearoom-tests.zip" -d "$out/mealybug-roms"
+    for rom in "$out"/mealybug-roms/*.gb; do
+      name=$(basename "$rom" .gb)
+      reference="$mealybug/expected/DMG-blob/$name.png"
+      [ -f "$reference" ] || continue
+      if "$RUNNER" --screenshot "$out/mealybug-$name.ppm" "$rom" 20000000 >"$out/mealybug-$name.log" 2>&1 &&
+         python3 "$ROOT/tests/compare_screenshot.py" "$out/mealybug-$name.ppm" "$reference" >>"$out/mealybug-$name.log" 2>&1; then
+        printf 'PASS\tmealybug\t%s.gb\n' "$name"
+      else
+        printf 'FAIL\tmealybug\t%s.gb\n' "$name"
+      fi
+    done
   fi
 } | sort -k1,1 -k2,2 -k3,3 >"$out/results.tsv"
 
