@@ -55,6 +55,10 @@ namespace
         {
             bank = cpu.mbc2_rom_bank;
         }
+        else if (cpu.cartridge_mbc3)
+        {
+            bank = cpu.mbc3_rom_bank;
+        }
         else if (cpu.cartridge_mbc1)
         {
             bank = (static_cast<std::size_t>(cpu.mbc1_bank_high) << mbc1_high_shift) |
@@ -75,8 +79,15 @@ namespace
         {
             return address & 0x01FF; // 512 addresses repeat across $A000-$BFFF.
         }
-        const std::size_t bank = cpu.cartridge_mbc5 ? cpu.mbc5_ram_bank :
-                                 (cpu.mbc1_banking_mode != 0 ? cpu.mbc1_bank_high : 0);
+        std::size_t bank = cpu.mbc1_banking_mode != 0 ? cpu.mbc1_bank_high : 0;
+        if (cpu.cartridge_mbc5)
+        {
+            bank = cpu.mbc5_ram_bank;
+        }
+        else if (cpu.cartridge_mbc3)
+        {
+            bank = cpu.mbc3_ram_select & 0x03;
+        }
         return (bank * 0x2000 + (address - 0xA000)) % cpu.cartridge_ram.size();
     }
 
@@ -122,8 +133,12 @@ namespace
 
     if (address >= 0xA000 && address < 0xC000 && !cpu.cartridge_rom.empty())
     {
-        if ((!cpu.cartridge_mbc1 && !cpu.cartridge_mbc2 && !cpu.cartridge_mbc5) ||
-            !cpu.cart_ram_enabled || cpu.cartridge_ram.empty())
+        if (cpu.cartridge_mbc3 && cpu.cart_ram_enabled && cpu.mbc3_ram_select >= 0x08)
+        {
+            return cpu.cartridge_has_rtc && cpu.mbc3_ram_select <= 0x0C ? read_cartridge_rtc(cpu) : 0xFF;
+        }
+        if ((!cpu.cartridge_mbc1 && !cpu.cartridge_mbc2 && !cpu.cartridge_mbc3 && !cpu.cartridge_mbc5) ||
+            !cpu.cart_ram_enabled || cpu.cartridge_ram.empty() || (cpu.cartridge_mbc3 && cpu.mbc3_ram_select > 0x03))
         {
             return 0xFF;
         }
@@ -259,6 +274,7 @@ namespace
         update_timers(cpu, cycles);
         update_oam_dma(cpu, cycles);
         update_serial(cpu, cycles);
+        update_cartridge_rtc(cpu, cycles);
     }
 
     void tick_ppu(CPU_LR35902 &cpu, int cycles)
@@ -401,6 +417,35 @@ namespace
                         cpu.mbc5_ram_bank = value & 0x0F;
                     }
                 }
+                else if (cpu.cartridge_mbc3)
+                {
+                    if (address < 0x2000)
+                    {
+                        cpu.cart_ram_enabled = (value & 0x0F) == 0x0A; // Also enables the RTC registers.
+                    }
+                    else if (address < 0x4000)
+                    {
+                        cpu.mbc3_rom_bank = value & 0x7F;
+                        if (cpu.mbc3_rom_bank == 0)
+                        {
+                            cpu.mbc3_rom_bank = 1;
+                        }
+                    }
+                    else if (address < 0x6000)
+                    {
+                        cpu.mbc3_ram_select = value;
+                    }
+                    else
+                    {
+                        // Writing $00 then $01 copies the running clock into the
+                        // registers that reads return.
+                        if (value == 0x01 && cpu.rtc_latch_armed)
+                        {
+                            cpu.rtc_latched = cpu.rtc_registers;
+                        }
+                        cpu.rtc_latch_armed = value == 0x00;
+                    }
+                }
                 else if (cpu.cartridge_mbc2)
                 {
                     // Address bit 8 selects RAMG or ROMB; $4000-$7FFF is not decoded.
@@ -452,8 +497,17 @@ namespace
 
         if (address >= 0xA000 && address < 0xC000 && !cpu.cartridge_rom.empty())
         {
-            if ((cpu.cartridge_mbc1 || cpu.cartridge_mbc2 || cpu.cartridge_mbc5) && cpu.cart_ram_enabled &&
-                !cpu.cartridge_ram.empty())
+            if (cpu.cartridge_mbc3 && cpu.cart_ram_enabled && cpu.mbc3_ram_select >= 0x08)
+            {
+                if (cpu.cartridge_has_rtc && cpu.mbc3_ram_select <= 0x0C)
+                {
+                    write_cartridge_rtc(cpu, value);
+                }
+                return;
+            }
+            if ((cpu.cartridge_mbc1 || cpu.cartridge_mbc2 || cpu.cartridge_mbc3 || cpu.cartridge_mbc5) &&
+                cpu.cart_ram_enabled && !cpu.cartridge_ram.empty() &&
+                !(cpu.cartridge_mbc3 && cpu.mbc3_ram_select > 0x03))
             {
                 cpu.cartridge_ram[cartridge_ram_index(cpu, address)] =
                     cpu.cartridge_mbc2 ? static_cast<uint8_t>(value & 0x0F) : value;

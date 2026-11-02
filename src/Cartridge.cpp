@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <ctime>
 #include <fstream>
 #include <iterator>
 #include <utility>
@@ -20,6 +21,67 @@ namespace
         0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
     };
     constexpr std::size_t MBC2_RAM_SIZE = 0x0200;
+    constexpr uint32_t CYCLES_PER_SECOND = 4194304;
+    // Clock state appended to the RAM in battery saves, in the layout BGB and
+    // VBA-M use: five 32-bit live registers, five latched, a 64-bit Unix time.
+    constexpr std::size_t RTC_SAVE_SIZE = 48;
+    constexpr std::size_t RTC_SAVE_SIZE_32BIT_TIME = 44;
+    constexpr std::array<uint8_t, 5> RTC_MASKS = {0x3F, 0x3F, 0x1F, 0xFF, 0xC1};
+
+    bool has_battery_save(const CPU_LR35902 &cpu)
+    {
+        return cpu.cartridge_battery_backed && (!cpu.cartridge_ram.empty() || cpu.cartridge_has_rtc);
+    }
+
+    void tick_rtc_second(CPU_LR35902 &cpu)
+    {
+        std::array<uint8_t, 5> &rtc = cpu.rtc_registers;
+        // Each counter wraps at its register width, so out-of-range values
+        // written by software roll over to zero without carrying.
+        rtc[0] = static_cast<uint8_t>((rtc[0] + 1) & 0x3F);
+        if (rtc[0] != 60)
+        {
+            return;
+        }
+        rtc[0] = 0;
+        rtc[1] = static_cast<uint8_t>((rtc[1] + 1) & 0x3F);
+        if (rtc[1] != 60)
+        {
+            return;
+        }
+        rtc[1] = 0;
+        rtc[2] = static_cast<uint8_t>((rtc[2] + 1) & 0x1F);
+        if (rtc[2] != 24)
+        {
+            return;
+        }
+        rtc[2] = 0;
+        const uint16_t day = static_cast<uint16_t>(((rtc[4] & 0x01) << 8 | rtc[3]) + 1);
+        rtc[3] = static_cast<uint8_t>(day);
+        rtc[4] = static_cast<uint8_t>((rtc[4] & 0xFE) | ((day >> 8) & 0x01));
+        if (day > 0x1FF)
+        {
+            rtc[4] |= 0x80; // Day counter carry
+        }
+    }
+
+    void put_le(std::vector<uint8_t> &data, uint64_t value, int bytes)
+    {
+        for (int index = 0; index < bytes; ++index)
+        {
+            data.push_back(static_cast<uint8_t>(value >> (index * 8)));
+        }
+    }
+
+    uint64_t get_le(const std::vector<uint8_t> &data, std::size_t offset, int bytes)
+    {
+        uint64_t value = 0;
+        for (int index = 0; index < bytes; ++index)
+        {
+            value |= static_cast<uint64_t>(data[offset + static_cast<std::size_t>(index)]) << (index * 8);
+        }
+        return value;
+    }
 
     std::size_t rom_size_from_code(uint8_t code)
     {
@@ -114,10 +176,11 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     const bool rom_only = cartridge_type == 0x00;
     const bool mbc1 = cartridge_type >= 0x01 && cartridge_type <= 0x03;
     const bool mbc2 = cartridge_type == 0x05 || cartridge_type == 0x06;
+    const bool mbc3 = cartridge_type >= 0x0F && cartridge_type <= 0x13;
     const bool mbc5 = cartridge_type >= 0x19 && cartridge_type <= 0x1E;
-    if (!rom_only && !mbc1 && !mbc2 && !mbc5)
+    if (!rom_only && !mbc1 && !mbc2 && !mbc3 && !mbc5)
     {
-        error = "Unsupported cartridge type; supported types are ROM ONLY, MBC1, MBC2, and MBC5.";
+        error = "Unsupported cartridge type; supported types are ROM ONLY, MBC1, MBC2, MBC3, and MBC5.";
         return false;
     }
 
@@ -151,14 +214,14 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     {
         ram_size = MBC2_RAM_SIZE; // Built-in 512x4-bit RAM; the header RAM size is unused.
     }
-    else if (mbc1 || mbc5)
+    else if (mbc1 || mbc3 || mbc5)
     {
         const uint8_t ram_size_code = rom[RAM_SIZE_ADDRESS];
-        if (mbc1 && cartridge_type == 0x01)
+        if ((mbc1 && cartridge_type == 0x01) || cartridge_type == 0x0F || cartridge_type == 0x11)
         {
             if (ram_size_code != 0)
             {
-                error = "MBC1 type 0x01 does not support cartridge RAM.";
+                error = "This cartridge type does not support cartridge RAM.";
                 return false;
             }
         }
@@ -181,8 +244,11 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     cpu.cartridge_mbc1 = mbc1;
     cpu.cartridge_mbc1_multicart = mbc1_multicart;
     cpu.cartridge_mbc2 = mbc2;
+    cpu.cartridge_mbc3 = mbc3;
+    cpu.cartridge_has_rtc = cartridge_type == 0x0F || cartridge_type == 0x10;
     cpu.cartridge_mbc5 = mbc5;
-    cpu.cartridge_battery_backed = cartridge_type == 0x03 || cartridge_type == 0x06 ||
+    cpu.cartridge_battery_backed = cartridge_type == 0x03 || cartridge_type == 0x06 || cartridge_type == 0x0F ||
+                                   cartridge_type == 0x10 || cartridge_type == 0x13 ||
                                    cartridge_type == 0x1B || cartridge_type == 0x1E;
     cpu.cartridge_ram.assign(ram_size, 0xFF);
     cpu.af.reg16 = 0x01B0;
@@ -280,9 +346,61 @@ bool load_rom_only_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::st
     return load_cartridge(cpu, std::move(rom), error, model);
 }
 
+void update_cartridge_rtc(CPU_LR35902 &cpu, int cycles)
+{
+    if (!cpu.cartridge_has_rtc || (cpu.rtc_registers[4] & 0x40) != 0)
+    {
+        return;
+    }
+    cpu.rtc_cycles += static_cast<uint32_t>(cycles);
+    while (cpu.rtc_cycles >= CYCLES_PER_SECOND)
+    {
+        cpu.rtc_cycles -= CYCLES_PER_SECOND;
+        tick_rtc_second(cpu);
+    }
+}
+
+void advance_cartridge_rtc_seconds(CPU_LR35902 &cpu, uint64_t seconds)
+{
+    if (!cpu.cartridge_has_rtc || (cpu.rtc_registers[4] & 0x40) != 0)
+    {
+        return;
+    }
+    // Whole days are added directly so long gaps between sessions stay cheap.
+    const uint64_t days = seconds / 86400;
+    for (uint64_t second = 0; second < seconds % 86400; ++second)
+    {
+        tick_rtc_second(cpu);
+    }
+    const uint64_t day = ((cpu.rtc_registers[4] & 0x01) << 8 | cpu.rtc_registers[3]) + days;
+    cpu.rtc_registers[3] = static_cast<uint8_t>(day);
+    cpu.rtc_registers[4] = static_cast<uint8_t>((cpu.rtc_registers[4] & 0xFE) | ((day >> 8) & 0x01));
+    if (day > 0x1FF)
+    {
+        cpu.rtc_registers[4] |= 0x80;
+    }
+}
+
+uint8_t read_cartridge_rtc(const CPU_LR35902 &cpu)
+{
+    const std::size_t index = static_cast<std::size_t>(cpu.mbc3_ram_select - 0x08);
+    return static_cast<uint8_t>(cpu.rtc_latched[index] & RTC_MASKS[index]);
+}
+
+void write_cartridge_rtc(CPU_LR35902 &cpu, uint8_t value)
+{
+    const std::size_t index = static_cast<std::size_t>(cpu.mbc3_ram_select - 0x08);
+    cpu.rtc_registers[index] = static_cast<uint8_t>(value & RTC_MASKS[index]);
+    cpu.rtc_latched[index] = cpu.rtc_registers[index];
+    if (index == 0)
+    {
+        cpu.rtc_cycles = 0; // Writing the seconds restarts the current second.
+    }
+}
+
 bool load_cartridge_ram(CPU_LR35902 &cpu, const std::filesystem::path &path, std::string &error)
 {
-    if (!cpu.cartridge_battery_backed || cpu.cartridge_ram.empty())
+    if (!has_battery_save(cpu))
     {
         error.clear();
         return true;
@@ -302,20 +420,39 @@ bool load_cartridge_ram(CPU_LR35902 &cpu, const std::filesystem::path &path, std
     }
 
     std::vector<uint8_t> save_data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    if (save_data.size() != cpu.cartridge_ram.size())
+    const std::size_t ram_size = cpu.cartridge_ram.size();
+    const std::size_t rtc_size = save_data.size() - std::min(save_data.size(), ram_size);
+    const bool valid_rtc_size = cpu.cartridge_has_rtc &&
+                                (rtc_size == 0 || rtc_size == RTC_SAVE_SIZE || rtc_size == RTC_SAVE_SIZE_32BIT_TIME);
+    if (save_data.size() < ram_size || (rtc_size != 0 && !valid_rtc_size))
     {
         error = "Cartridge save size does not match the RAM size in the ROM header.";
         return false;
     }
 
-    cpu.cartridge_ram = std::move(save_data);
+    std::copy(save_data.begin(), save_data.begin() + static_cast<std::ptrdiff_t>(ram_size), cpu.cartridge_ram.begin());
+    if (rtc_size != 0)
+    {
+        for (std::size_t index = 0; index < 5; ++index)
+        {
+            cpu.rtc_registers[index] = static_cast<uint8_t>(get_le(save_data, ram_size + index * 4, 4) & RTC_MASKS[index]);
+            cpu.rtc_latched[index] = static_cast<uint8_t>(get_le(save_data, ram_size + 20 + index * 4, 4) & RTC_MASKS[index]);
+        }
+        const int time_bytes = rtc_size == RTC_SAVE_SIZE ? 8 : 4;
+        const uint64_t saved_time = get_le(save_data, ram_size + 40, time_bytes);
+        const uint64_t now = static_cast<uint64_t>(std::time(nullptr));
+        if (now > saved_time)
+        {
+            advance_cartridge_rtc_seconds(cpu, now - saved_time); // Time passed while the game was off.
+        }
+    }
     error.clear();
     return true;
 }
 
 bool save_cartridge_ram(const CPU_LR35902 &cpu, const std::filesystem::path &path, std::string &error)
 {
-    if (!cpu.cartridge_battery_backed || cpu.cartridge_ram.empty())
+    if (!has_battery_save(cpu))
     {
         error.clear();
         return true;
@@ -328,8 +465,20 @@ bool save_cartridge_ram(const CPU_LR35902 &cpu, const std::filesystem::path &pat
         return false;
     }
 
-    file.write(reinterpret_cast<const char *>(cpu.cartridge_ram.data()),
-               static_cast<std::streamsize>(cpu.cartridge_ram.size()));
+    std::vector<uint8_t> save_data = cpu.cartridge_ram;
+    if (cpu.cartridge_has_rtc)
+    {
+        for (const uint8_t value : cpu.rtc_registers)
+        {
+            put_le(save_data, value, 4);
+        }
+        for (const uint8_t value : cpu.rtc_latched)
+        {
+            put_le(save_data, value, 4);
+        }
+        put_le(save_data, static_cast<uint64_t>(std::time(nullptr)), 8);
+    }
+    file.write(reinterpret_cast<const char *>(save_data.data()), static_cast<std::streamsize>(save_data.size()));
     file.close();
     if (!file)
     {

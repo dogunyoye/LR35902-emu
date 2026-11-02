@@ -61,12 +61,24 @@ struct CPU_LR35902
     bool cartridge_mbc1 = false;
     bool cartridge_mbc1_multicart = false;
     bool cartridge_mbc2 = false;
+    bool cartridge_mbc3 = false;
+    bool cartridge_has_rtc = false;
     bool cartridge_mbc5 = false;
     bool cartridge_battery_backed = false;
     uint8_t mbc1_rom_bank_low = 1;
     uint8_t mbc1_bank_high = 0;
     uint8_t mbc1_banking_mode = 0;
     uint8_t mbc2_rom_bank = 1;
+    uint8_t mbc3_rom_bank = 1;
+    // $00-$03 selects a RAM bank, $08-$0C an RTC register.
+    uint8_t mbc3_ram_select = 0;
+    // MBC3 real-time clock: seconds, minutes, hours, day low, day high
+    // (bit 0 day bit 8, bit 6 halt, bit 7 day carry), the copy latched for
+    // reading, and the T-cycles counted toward the next second.
+    std::array<uint8_t, 5> rtc_registers{};
+    std::array<uint8_t, 5> rtc_latched{};
+    bool rtc_latch_armed = false;
+    uint32_t rtc_cycles = 0;
     uint16_t mbc5_rom_bank = 1;
     uint8_t mbc5_ram_bank = 0;
     bool vram_locked = false;
@@ -138,6 +150,10 @@ void tick_peripherals(CPU_LR35902 &cpu, int cycles);
 void reset_divider(CPU_LR35902 &cpu);
 void write_timer_control(CPU_LR35902 &cpu, uint8_t value);
 void update_serial(CPU_LR35902 &cpu, int cycles);
+void update_cartridge_rtc(CPU_LR35902 &cpu, int cycles);
+void advance_cartridge_rtc_seconds(CPU_LR35902 &cpu, uint64_t seconds);
+uint8_t read_cartridge_rtc(const CPU_LR35902 &cpu);
+void write_cartridge_rtc(CPU_LR35902 &cpu, uint8_t value);
 bool load_rom_only_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error,
                              GameBoyModel model = GameBoyModel::DmgABC);
 bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error,
