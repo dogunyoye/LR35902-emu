@@ -56,11 +56,14 @@ struct CPU_LR35902
     // Memory routing state.
     bool cart_ram_enabled = false;
     bool cartridge_mbc1 = false;
+    bool cartridge_mbc1_multicart = false;
+    bool cartridge_mbc2 = false;
     bool cartridge_mbc5 = false;
     bool cartridge_battery_backed = false;
     uint8_t mbc1_rom_bank_low = 1;
     uint8_t mbc1_bank_high = 0;
     uint8_t mbc1_banking_mode = 0;
+    uint8_t mbc2_rom_bank = 1;
     uint16_t mbc5_rom_bank = 1;
     uint8_t mbc5_ram_bank = 0;
     bool vram_locked = false;

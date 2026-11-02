@@ -1,5 +1,7 @@
 #include "LR35902.h"
 
+#include <algorithm>
+#include <array>
 #include <fstream>
 #include <iterator>
 #include <utility>
@@ -10,10 +12,18 @@ namespace
     constexpr std::size_t CARTRIDGE_TYPE_ADDRESS = 0x0147;
     constexpr std::size_t ROM_SIZE_ADDRESS = 0x0148;
     constexpr std::size_t RAM_SIZE_ADDRESS = 0x0149;
+    constexpr std::size_t LOGO_ADDRESS = 0x0104;
+    constexpr std::array<uint8_t, 0x30> NINTENDO_LOGO = {
+        0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83,
+        0x00, 0x0C, 0x00, 0x0D, 0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
+        0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99, 0xBB, 0xBB, 0x67, 0x63,
+        0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
+    };
+    constexpr std::size_t MBC2_RAM_SIZE = 0x0200;
 
     std::size_t rom_size_from_code(uint8_t code)
     {
-        if (code > 6)
+        if (code > 8)
         {
             return 0;
         }
@@ -40,6 +50,16 @@ namespace
             return false;
         }
     }
+
+    // MBC1 multicarts are wired differently but share the normal MBC1 header.
+    // Like other emulators, detect them as 8 Mbit ROMs whose second 2 Mbit
+    // game also starts with a cartridge header logo.
+    bool is_mbc1_multicart(const std::vector<uint8_t> &rom)
+    {
+        constexpr std::size_t SECOND_GAME_LOGO = 0x10 * ROM_BANK_SIZE + LOGO_ADDRESS;
+        return rom.size() == 0x100000 &&
+               std::equal(NINTENDO_LOGO.begin(), NINTENDO_LOGO.end(), rom.begin() + SECOND_GAME_LOGO);
+    }
 }
 
 bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error,
@@ -56,10 +76,11 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
         (static_cast<uint16_t>(rom[0x014E]) << 8) | rom[0x014F]);
     const bool rom_only = cartridge_type == 0x00;
     const bool mbc1 = cartridge_type >= 0x01 && cartridge_type <= 0x03;
+    const bool mbc2 = cartridge_type == 0x05 || cartridge_type == 0x06;
     const bool mbc5 = cartridge_type >= 0x19 && cartridge_type <= 0x1E;
-    if (!rom_only && !mbc1 && !mbc5)
+    if (!rom_only && !mbc1 && !mbc2 && !mbc5)
     {
-        error = "Unsupported cartridge type; supported types are ROM ONLY, MBC1, and MBC5.";
+        error = "Unsupported cartridge type; supported types are ROM ONLY, MBC1, MBC2, and MBC5.";
         return false;
     }
 
@@ -82,8 +103,18 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
         return false;
     }
 
+    if (mbc2 && rom_size_code > 3)
+    {
+        error = "MBC2 cartridges support at most 256 KiB of ROM.";
+        return false;
+    }
+
     std::size_t ram_size = 0;
-    if (mbc1 || mbc5)
+    if (mbc2)
+    {
+        ram_size = MBC2_RAM_SIZE; // Built-in 512x4-bit RAM; the header RAM size is unused.
+    }
+    else if (mbc1 || mbc5)
     {
         const uint8_t ram_size_code = rom[RAM_SIZE_ADDRESS];
         if (mbc1 && cartridge_type == 0x01)
@@ -101,11 +132,15 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
         }
     }
 
+    const bool mbc1_multicart = mbc1 && is_mbc1_multicart(rom);
     cpu = CPU_LR35902{};
     cpu.cartridge_rom = std::move(rom);
     cpu.cartridge_mbc1 = mbc1;
+    cpu.cartridge_mbc1_multicart = mbc1_multicart;
+    cpu.cartridge_mbc2 = mbc2;
     cpu.cartridge_mbc5 = mbc5;
-    cpu.cartridge_battery_backed = cartridge_type == 0x03 || cartridge_type == 0x1B || cartridge_type == 0x1E;
+    cpu.cartridge_battery_backed = cartridge_type == 0x03 || cartridge_type == 0x06 ||
+                                   cartridge_type == 0x1B || cartridge_type == 0x1E;
     cpu.cartridge_ram.assign(ram_size, 0xFF);
     cpu.af.reg16 = 0x01B0;
     cpu.bc.reg16 = 0x0013;

@@ -35,21 +35,29 @@ namespace
     uint8_t read_cartridge_rom(const CPU_LR35902 &cpu, uint16_t address)
     {
         const std::size_t bank_count = cpu.cartridge_rom.size() / 0x4000;
+        // Multicarts wire BANK2 to ROM A18-A19 and leave BANK1 bit 4 unconnected.
+        const int mbc1_high_shift = cpu.cartridge_mbc1_multicart ? 4 : 5;
+        const uint8_t mbc1_low_mask = cpu.cartridge_mbc1_multicart ? 0x0F : 0x1F;
         std::size_t bank = 0;
         if (address < 0x4000)
         {
             if (cpu.cartridge_mbc1 && cpu.mbc1_banking_mode != 0)
             {
-                bank = static_cast<std::size_t>(cpu.mbc1_bank_high) << 5;
+                bank = static_cast<std::size_t>(cpu.mbc1_bank_high) << mbc1_high_shift;
             }
         }
         else if (cpu.cartridge_mbc5)
         {
             bank = cpu.mbc5_rom_bank;
         }
+        else if (cpu.cartridge_mbc2)
+        {
+            bank = cpu.mbc2_rom_bank;
+        }
         else if (cpu.cartridge_mbc1)
         {
-            bank = (static_cast<std::size_t>(cpu.mbc1_bank_high) << 5) | cpu.mbc1_rom_bank_low;
+            bank = (static_cast<std::size_t>(cpu.mbc1_bank_high) << mbc1_high_shift) |
+                   (cpu.mbc1_rom_bank_low & mbc1_low_mask);
         }
         else
         {
@@ -62,6 +70,10 @@ namespace
 
     std::size_t cartridge_ram_index(const CPU_LR35902 &cpu, uint16_t address)
     {
+        if (cpu.cartridge_mbc2)
+        {
+            return address & 0x01FF; // 512 addresses repeat across $A000-$BFFF.
+        }
         const std::size_t bank = cpu.cartridge_mbc5 ? cpu.mbc5_ram_bank :
                                  (cpu.mbc1_banking_mode != 0 ? cpu.mbc1_bank_high : 0);
         return (bank * 0x2000 + (address - 0xA000)) % cpu.cartridge_ram.size();
@@ -109,11 +121,13 @@ namespace
 
     if (address >= 0xA000 && address < 0xC000 && !cpu.cartridge_rom.empty())
     {
-        if ((!cpu.cartridge_mbc1 && !cpu.cartridge_mbc5) || !cpu.cart_ram_enabled || cpu.cartridge_ram.empty())
+        if ((!cpu.cartridge_mbc1 && !cpu.cartridge_mbc2 && !cpu.cartridge_mbc5) ||
+            !cpu.cart_ram_enabled || cpu.cartridge_ram.empty())
         {
             return 0xFF;
         }
-        return cpu.cartridge_ram[cartridge_ram_index(cpu, address)];
+        const uint8_t value = cpu.cartridge_ram[cartridge_ram_index(cpu, address)];
+        return cpu.cartridge_mbc2 ? static_cast<uint8_t>(value | 0xF0) : value; // MBC2 RAM is 4 bits wide.
     }
 
     if (address == JOYP_REG)
@@ -384,6 +398,22 @@ void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
                     cpu.mbc5_ram_bank = value & 0x0F;
                 }
             }
+            else if (cpu.cartridge_mbc2)
+            {
+                // Address bit 8 selects RAMG or ROMB; $4000-$7FFF is not decoded.
+                if (address < 0x4000 && (address & 0x0100) == 0)
+                {
+                    cpu.cart_ram_enabled = (value & 0x0F) == 0x0A;
+                }
+                else if (address < 0x4000)
+                {
+                    cpu.mbc2_rom_bank = value & 0x0F;
+                    if (cpu.mbc2_rom_bank == 0)
+                    {
+                        cpu.mbc2_rom_bank = 1;
+                    }
+                }
+            }
             else if (cpu.cartridge_mbc1)
             {
                 if (address < 0x2000)
@@ -419,9 +449,11 @@ void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
 
     if (address >= 0xA000 && address < 0xC000 && !cpu.cartridge_rom.empty())
     {
-        if ((cpu.cartridge_mbc1 || cpu.cartridge_mbc5) && cpu.cart_ram_enabled && !cpu.cartridge_ram.empty())
+        if ((cpu.cartridge_mbc1 || cpu.cartridge_mbc2 || cpu.cartridge_mbc5) && cpu.cart_ram_enabled &&
+            !cpu.cartridge_ram.empty())
         {
-            cpu.cartridge_ram[cartridge_ram_index(cpu, address)] = value;
+            cpu.cartridge_ram[cartridge_ram_index(cpu, address)] =
+                cpu.cartridge_mbc2 ? static_cast<uint8_t>(value & 0x0F) : value;
         }
         return;
     }

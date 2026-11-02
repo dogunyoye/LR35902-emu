@@ -1,6 +1,8 @@
 #include "LR35902.h"
 
+#include <algorithm>
 #include <cassert>
+#include <iterator>
 #include <filesystem>
 #include <utility>
 
@@ -125,6 +127,74 @@ static void test_mbc1_ram_banking_and_enable()
     assert(cpu_read(cpu, 0xA000) == 0x34);
 }
 
+static void test_mbc1_multicart_rom_banking()
+{
+    constexpr std::size_t ROM_BANK_SIZE = 0x4000;
+    constexpr std::size_t ROM_BANK_COUNT = 64;
+    constexpr uint8_t LOGO[] = {
+        0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83,
+        0x00, 0x0C, 0x00, 0x0D, 0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
+        0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99, 0xBB, 0xBB, 0x67, 0x63,
+        0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E};
+    std::vector<uint8_t> rom(ROM_BANK_SIZE * ROM_BANK_COUNT, 0);
+    for (std::size_t bank = 0; bank < ROM_BANK_COUNT; ++bank)
+    {
+        rom[bank * ROM_BANK_SIZE] = static_cast<uint8_t>(bank);
+    }
+    std::copy(std::begin(LOGO), std::end(LOGO), rom.begin() + 0x10 * ROM_BANK_SIZE + 0x0104);
+    rom[0x0147] = 0x01; // MBC1
+    rom[0x0148] = 0x05; // 64 ROM banks
+    rom[0x0149] = 0x00;
+    std::string error;
+    CPU_LR35902 cpu{};
+
+    assert(load_cartridge(cpu, std::move(rom), error));
+    assert(cpu.cartridge_mbc1_multicart);
+
+    cpu_write(cpu, 0x2000, 0x12); // BANK1 bit 4 is not connected
+    assert(cpu_read(cpu, 0x4000) == 0x02);
+    cpu_write(cpu, 0x4000, 1); // BANK2 selects the 2 Mbit game
+    assert(cpu_read(cpu, 0x4000) == 0x12);
+    cpu_write(cpu, 0x6000, 1);
+    assert(cpu_read(cpu, 0x0000) == 0x10);
+}
+
+static void test_mbc2_banking_and_ram()
+{
+    constexpr std::size_t ROM_BANK_SIZE = 0x4000;
+    constexpr std::size_t ROM_BANK_COUNT = 16;
+    std::vector<uint8_t> rom(ROM_BANK_SIZE * ROM_BANK_COUNT, 0);
+    for (std::size_t bank = 0; bank < ROM_BANK_COUNT; ++bank)
+    {
+        rom[bank * ROM_BANK_SIZE] = static_cast<uint8_t>(bank);
+    }
+    rom[0x0147] = 0x06; // MBC2 + battery
+    rom[0x0148] = 0x03; // 16 ROM banks
+    rom[0x0149] = 0x00; // Built-in RAM is not described by the header
+    std::string error;
+    CPU_LR35902 cpu{};
+
+    assert(load_cartridge(cpu, std::move(rom), error));
+    assert(cpu.cartridge_mbc2);
+    assert(cpu_read(cpu, 0x4000) == 1);
+
+    cpu_write(cpu, 0x2100, 0x05); // Address bit 8 set selects ROMB
+    assert(cpu_read(cpu, 0x4000) == 5);
+    cpu_write(cpu, 0x0100, 0x00);
+    assert(cpu_read(cpu, 0x4000) == 1); // Bank zero aliases bank one
+    cpu_write(cpu, 0x4000, 0x03);       // Not decoded
+    assert(cpu_read(cpu, 0x4000) == 1);
+
+    cpu_write(cpu, 0xA000, 0x05);
+    assert(cpu_read(cpu, 0xA000) == 0xFF);
+    cpu_write(cpu, 0x2000, 0x0A); // Address bit 8 clear selects RAMG
+    cpu_write(cpu, 0xA000, 0x35);
+    assert(cpu_read(cpu, 0xA000) == 0xF5); // Only the low nibble exists
+    assert(cpu_read(cpu, 0xA200) == 0xF5); // 512 addresses repeat
+    cpu_write(cpu, 0x0000, 0x00);
+    assert(cpu_read(cpu, 0xA000) == 0xFF);
+}
+
 static void test_mbc5_banking_and_ram()
 {
     std::vector<uint8_t> rom(0x8000, 0);
@@ -194,6 +264,8 @@ int main()
     test_rom_only_cartridge();
     test_mbc1_rom_banking();
     test_mbc1_ram_banking_and_enable();
+    test_mbc1_multicart_rom_banking();
+    test_mbc2_banking_and_ram();
     test_mbc5_banking_and_ram();
     test_battery_ram_persistence();
     return 0;

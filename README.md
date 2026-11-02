@@ -11,7 +11,7 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | CPU register model (AF/BC/DE/HL, SP, PC, IME) | :white_check_mark: done |
 | 64 KB flat memory space + read/write routing | :white_check_mark: done |
 | WRAM echo (0xE000–0xFDFF) | :white_check_mark: done |
-| ROM-only and MBC1 cartridges (banked ROM/RAM, battery saves) | :white_check_mark: done |
+| ROM-only, MBC1 (including multicarts), MBC2, and MBC5 cartridges (banked ROM/RAM, battery saves) | :white_check_mark: done |
 | VRAM/OAM access locking during PPU modes | :white_check_mark: done |
 | Legal base and CB-prefixed opcode coverage, including STOP | :white_check_mark: done |
 | Timer registers (DIV/TIMA/TMA/TAC) and update logic | :white_check_mark: done |
@@ -22,9 +22,9 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | Cycle-driven CPU and timer stepping | :white_check_mark: done |
 | Approximate variable mode-3 timing, BG/window/sprite rendering, VBlank and STAT interrupts | :white_check_mark: done |
 | Regression tests for CPU, timer, serial, interrupts, joypad, cartridge, memory, and PPU behavior | :white_check_mark: done |
-| CLI runner with cycle-driven ROM-only/MBC1 support and keyboard controls | :white_check_mark: done |
+| CLI runner with cycle-driven cartridge support and keyboard controls | :white_check_mark: done |
 | Cycle-exact CPU and peripheral conformance | :soon: planned |
-| MBC5 and other mapper emulation | :soon: planned |
+| Other mappers (MBC3, RTC, etc.) | :soon: planned |
 | Full PPU and hardware fidelity | :soon: planned |
 
 ## Building
@@ -74,13 +74,13 @@ Run the demo program:
 ./build/lr35902-emu
 ```
 
-Run a supported ROM-only (32 KiB) or MBC1 cartridge image:
+Run a supported ROM-only (32 KiB), MBC1, MBC2, or MBC5 cartridge image:
 
 ```sh
 ./build/lr35902-emu /path/to/game.gb
 ```
 
-MBC1 battery-backed RAM is loaded from and saved to a same-basename `.sav` file beside the ROM.
+Battery-backed cartridge RAM is loaded from and saved to a same-basename `.sav` file beside the ROM.
 
 Controls: arrow keys move, Z is A, X is B, Right Shift is Select, and Enter is Start.
 
@@ -101,7 +101,7 @@ Show usage/help:
 ├── src/
 │   ├── LR35902.cpp      # Instruction decoder, flags, interrupt stepping
 │   ├── Memory.cpp       # Memory routing and access rules
-│   ├── Cartridge.cpp    # ROM-only/MBC1 validation, banking, and save RAM
+│   ├── Cartridge.cpp    # Cartridge validation, banking, and save RAM
 │   ├── PPU.cpp          # LCD modes, scanlines, and BG/window/sprite composition
 │   ├── Serial.cpp       # Internal-clock serial transfers and test output
 │   ├── Timer.cpp        # Divider/timer register updates
@@ -109,7 +109,7 @@ Show usage/help:
 ├── tests/
 │   ├── cpu_tests.cpp        # CPU instructions, flags, and interrupts
 │   ├── timer_tests.cpp      # Timer register behavior
-│   ├── cartridge_tests.cpp  # ROM-only/MBC1 loading, banking, and save persistence
+│   ├── cartridge_tests.cpp  # Cartridge loading, banking, and save persistence
 │   ├── memory_tests.cpp     # Memory-bus address behavior
 │   ├── joypad_tests.cpp     # JOYP selection and interrupt behavior
 │   ├── serial_tests.cpp     # Serial transfer and interrupt behavior
