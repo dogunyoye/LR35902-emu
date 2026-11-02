@@ -19,11 +19,11 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | JOYP register, keyboard input, and joypad interrupt | :white_check_mark: done |
 | SB/SC serial transfer and serial interrupt | :white_check_mark: done |
 | Serial-output ROM test runner | :white_check_mark: done |
-| Cycle-driven CPU and timer stepping | :white_check_mark: done |
+| M-cycle bus timing: timers, OAM DMA, serial, and PPU advance with each CPU memory access | :white_check_mark: done |
 | Approximate variable mode-3 timing, BG/window/sprite rendering, VBlank and STAT interrupts | :white_check_mark: done |
 | Regression tests for CPU, timer, serial, interrupts, joypad, cartridge, memory, and PPU behavior | :white_check_mark: done |
 | CLI runner with cycle-driven cartridge support and keyboard controls | :white_check_mark: done |
-| Cycle-exact CPU and peripheral conformance | :soon: planned |
+| Sub-M-cycle peripheral conformance (OAM corruption bug, DMA bus conflicts) | :soon: planned |
 | Other mappers (MBC3, RTC, etc.) | :soon: planned |
 | Full PPU and hardware fidelity | :soon: planned |
 

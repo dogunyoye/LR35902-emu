@@ -1,4 +1,5 @@
 #include "LR35902.h"
+#include "PPU.h"
 
 // Important Game Boy Memory Ranges
 const uint16_t VRAM_START = 0x8000;
@@ -194,6 +195,10 @@ namespace
 
 uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
 {
+    if (cpu.bus_ticking)
+    {
+        tick_peripherals(cpu, 4); // Reads sample the bus at the end of their M-cycle.
+    }
     if (is_unmapped_dmg_io(address))
     {
         return 0xFF;
@@ -202,7 +207,7 @@ uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
     const bool echo_wram_access = address >= ECHO_START && address <= ECHO_END;
     const bool rom_access_during_vram_dma = address >= 0x0100 && address < 0x8000 &&
                                             cpu.oam_dma_source >= 0x80 && cpu.oam_dma_source <= 0x9F;
-    if (cpu.oam_dma_bus_blocked && !hram_access && !echo_wram_access &&
+    if (cpu.oam_dma_active && !hram_access && !echo_wram_access &&
         !rom_access_during_vram_dma && address != 0xFF46)
     {
         return 0xFF;
@@ -212,274 +217,284 @@ uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
 
 void update_oam_dma(CPU_LR35902 &cpu, int cycles)
 {
-    if (!cpu.oam_dma_active || cycles <= 0)
+    for (int cycle = 0; cycle < cycles; ++cycle)
     {
-        return;
-    }
-
-    for (int cycle = 0; cycle < cycles && cpu.oam_dma_active; ++cycle)
-    {
-        if (cpu.oam_dma_startup_delay != 0)
+        if (!cpu.oam_dma_active && cpu.oam_dma_start_delay == 0)
         {
-            --cpu.oam_dma_startup_delay;
-            if (cpu.oam_dma_startup_delay == 0)
-            {
-                cpu.oam_dma_bus_blocked = true;
-            }
+            cpu.oam_dma_cycle_phase = 0;
+            return;
         }
 
-        if (cpu.oam_dma_first_byte_delay != 0)
-        {
-            --cpu.oam_dma_first_byte_delay;
-            if (cpu.oam_dma_first_byte_delay == 0)
-            {
-                const uint16_t source_address = static_cast<uint16_t>(
-                    (static_cast<uint16_t>(cpu.oam_dma_source) << 8) + cpu.oam_dma_index);
-                const uint16_t dma_bus_address = source_address >= 0xFE00
-                                                     ? static_cast<uint16_t>(source_address - 0x2000)
-                                                     : source_address;
-                cpu.memory[OAM_START + cpu.oam_dma_index] = cpu_read_unrestricted(cpu, dma_bus_address);
-                ++cpu.oam_dma_index;
-            }
-            continue;
-        }
-
-        ++cpu.oam_dma_cycle_phase;
-        if (cpu.oam_dma_cycle_phase != 4)
+        cpu.oam_dma_cycle_phase = static_cast<uint8_t>((cpu.oam_dma_cycle_phase + 1) & 0x03);
+        if (cpu.oam_dma_cycle_phase != 0)
         {
             continue;
         }
 
-        cpu.oam_dma_cycle_phase = 0;
-        const uint16_t source_address = static_cast<uint16_t>(
-            (static_cast<uint16_t>(cpu.oam_dma_source) << 8) + cpu.oam_dma_index);
-        const uint16_t destination_address = static_cast<uint16_t>(OAM_START + cpu.oam_dma_index);
-        const uint16_t dma_bus_address = source_address >= 0xFE00
-                                             ? static_cast<uint16_t>(source_address - 0x2000)
-                                             : source_address;
-        cpu.memory[destination_address] = cpu_read_unrestricted(cpu, dma_bus_address);
-        ++cpu.oam_dma_index;
-        if (cpu.oam_dma_index == 0xA0)
+        if (cpu.oam_dma_active)
         {
-            cpu.oam_dma_active = false;
-            cpu.oam_dma_bus_blocked = false;
+            const uint16_t source_address = static_cast<uint16_t>(
+                (static_cast<uint16_t>(cpu.oam_dma_source) << 8) + cpu.oam_dma_index);
+            const uint16_t dma_bus_address = source_address >= 0xFE00
+                                                 ? static_cast<uint16_t>(source_address - 0x2000)
+                                                 : source_address;
+            cpu.memory[OAM_START + cpu.oam_dma_index] = cpu_read_unrestricted(cpu, dma_bus_address);
+            ++cpu.oam_dma_index;
+            cpu.oam_dma_active = cpu.oam_dma_index < 0xA0;
+        }
+
+        if (cpu.oam_dma_start_delay != 0 && --cpu.oam_dma_start_delay == 0)
+        {
+            cpu.oam_dma_active = true;
+            cpu.oam_dma_source = cpu.oam_dma_pending_source;
+            cpu.oam_dma_index = 0;
         }
     }
 }
 
-void advance_oam_dma_for_cpu_instruction(CPU_LR35902 &cpu, int cycles)
+namespace
 {
-    if (cycles <= 0)
+    void tick_cpu_side(CPU_LR35902 &cpu, int cycles)
     {
-        return;
+        update_timers(cpu, cycles);
+        update_oam_dma(cpu, cycles);
+        update_serial(cpu, cycles);
     }
-    update_oam_dma(cpu, cycles);
-    if (cpu.cpu_instruction_active)
+
+    void tick_ppu(CPU_LR35902 &cpu, int cycles)
     {
-        cpu.cpu_instruction_dma_cycles += cycles;
+        if (cpu.ppu != nullptr)
+        {
+            update_ppu(cpu, *cpu.ppu, cycles);
+        }
+    }
+}
+
+void tick_peripherals(CPU_LR35902 &cpu, int cycles)
+{
+    tick_cpu_side(cpu, cycles);
+    tick_ppu(cpu, cycles);
+    if (cpu.bus_ticking)
+    {
+        cpu.bus_cycles += cycles;
+    }
+}
+
+namespace
+{
+    void write_memory(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
+    {
+        if (is_unmapped_dmg_io(address))
+        {
+            return;
+        }
+        if (cpu.oam_dma_active && address != 0xFF46 && !(address >= HRAM_START && address <= HRAM_END))
+        {
+            return;
+        }
+
+        if (address == 0xFF46)
+        {
+            cpu.memory[address] = value;
+            cpu.oam_dma_pending_source = value;
+            cpu.oam_dma_start_delay = 2;
+            return;
+        }
+
+        if (address == JOYP_REG)
+        {
+            const uint8_t old_lines = joypad_lines(cpu);
+            cpu.memory[JOYP_REG] = value & 0x30;
+            request_joypad_interrupt_on_falling_edge(cpu, old_lines);
+            return;
+        }
+
+        if (address == SC_REG)
+        {
+            cpu.memory[SC_REG] = value & 0x81;
+            cpu.serial_transfer_active = (value & 0x80) != 0;
+            cpu.serial_internal_clock = (value & 0x01) != 0;
+            cpu.serial_cycles_remaining = cpu.serial_transfer_active && cpu.serial_internal_clock
+                                              ? static_cast<uint16_t>(4096 - (cpu.serial_divider_accumulator & 0x01FF))
+                                              : 0;
+            if (cpu.serial_transfer_active)
+            {
+                cpu.serial_shift_register = cpu.memory[SB_REG];
+            }
+            return;
+        }
+
+        if (address == 0xFF0F)
+        {
+            cpu.memory[address] = value & 0x1F;
+            return;
+        }
+
+        if (address == 0xFF41)
+        {
+            cpu.memory[address] = static_cast<uint8_t>((cpu.memory[address] & 0x07) | (value & 0x78));
+            return;
+        }
+
+        if (address == 0xFF04)
+        {
+            reset_divider(cpu);
+            return;
+        }
+
+        if (address == 0xFF05)
+        {
+            if (cpu.tima_reload_delay == 1 || cpu.tima_reloaded_this_cycle)
+            {
+                return;
+            }
+            if (cpu.tima_reload_delay > 1)
+            {
+                cpu.tima_reload_delay = 0;
+            }
+            cpu.memory[address] = value;
+            return;
+        }
+
+        if (address == 0xFF06)
+        {
+            cpu.memory[address] = value;
+            if (cpu.tima_reloaded_this_cycle)
+            {
+                cpu.memory[0xFF05] = value;
+            }
+            return;
+        }
+
+        if (address == 0xFF07)
+        {
+            write_timer_control(cpu, value);
+            return;
+        }
+
+        if (address < 0x8000)
+        {
+            if (!cpu.cartridge_rom.empty())
+            {
+                if (cpu.cartridge_mbc5)
+                {
+                    if (address < 0x2000)
+                    {
+                        cpu.cart_ram_enabled = !cpu.cartridge_ram.empty() && (value & 0x0F) == 0x0A;
+                    }
+                    else if (address < 0x3000)
+                    {
+                        cpu.mbc5_rom_bank = static_cast<uint16_t>((cpu.mbc5_rom_bank & 0x100) | value);
+                    }
+                    else if (address < 0x4000)
+                    {
+                        cpu.mbc5_rom_bank = static_cast<uint16_t>((cpu.mbc5_rom_bank & 0xFF) | ((value & 0x01) << 8));
+                    }
+                    else if (address < 0x6000)
+                    {
+                        cpu.mbc5_ram_bank = value & 0x0F;
+                    }
+                }
+                else if (cpu.cartridge_mbc2)
+                {
+                    // Address bit 8 selects RAMG or ROMB; $4000-$7FFF is not decoded.
+                    if (address < 0x4000 && (address & 0x0100) == 0)
+                    {
+                        cpu.cart_ram_enabled = (value & 0x0F) == 0x0A;
+                    }
+                    else if (address < 0x4000)
+                    {
+                        cpu.mbc2_rom_bank = value & 0x0F;
+                        if (cpu.mbc2_rom_bank == 0)
+                        {
+                            cpu.mbc2_rom_bank = 1;
+                        }
+                    }
+                }
+                else if (cpu.cartridge_mbc1)
+                {
+                    if (address < 0x2000)
+                    {
+                        cpu.cart_ram_enabled = !cpu.cartridge_ram.empty() && (value & 0x0F) == 0x0A;
+                    }
+                    else if (address < 0x4000)
+                    {
+                        cpu.mbc1_rom_bank_low = value & 0x1F;
+                        if (cpu.mbc1_rom_bank_low == 0)
+                        {
+                            cpu.mbc1_rom_bank_low = 1;
+                        }
+                    }
+                    else if (address < 0x6000)
+                    {
+                        cpu.mbc1_bank_high = value & 0x03;
+                    }
+                    else
+                    {
+                        cpu.mbc1_banking_mode = value & 0x01;
+                    }
+                }
+                return;
+            }
+
+            if ((address & 0x1FFF) == 0x0000)
+            {
+                cpu.cart_ram_enabled = (value & 0x0F) == 0x0A;
+            }
+            return;
+        }
+
+        if (address >= 0xA000 && address < 0xC000 && !cpu.cartridge_rom.empty())
+        {
+            if ((cpu.cartridge_mbc1 || cpu.cartridge_mbc2 || cpu.cartridge_mbc5) && cpu.cart_ram_enabled &&
+                !cpu.cartridge_ram.empty())
+            {
+                cpu.cartridge_ram[cartridge_ram_index(cpu, address)] =
+                    cpu.cartridge_mbc2 ? static_cast<uint8_t>(value & 0x0F) : value;
+            }
+            return;
+        }
+
+        if (address >= VRAM_START && address <= VRAM_END && cpu.ppu != nullptr &&
+            ppu_blocks_vram_write(*cpu.ppu))
+        {
+            return;
+        }
+
+        if (address >= OAM_START && address <= OAM_END && cpu.ppu != nullptr &&
+            ppu_blocks_oam_write(*cpu.ppu))
+        {
+            return;
+        }
+
+        if (address >= OAM_UNUSABLE_START && address <= OAM_UNUSABLE_END)
+        {
+            return;
+        }
+
+        // Echo RAM mapping (WRAM mirror from 0xC000-0xDFFF to 0xE000-0xFDFF)
+        if (address >= ECHO_START && address <= ECHO_END)
+        {
+            address -= 0x2000;
+        }
+
+        cpu.memory[address] = value;
     }
 }
 
 void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
 {
-    if (is_unmapped_dmg_io(address))
+    if (cpu.bus_ticking)
     {
+        // The timer, DMA, and serial clocks advance before a write lands, while
+        // the PPU sees it at the start of the M-cycle.
+        tick_cpu_side(cpu, 4);
+        write_memory(cpu, address, value);
+        tick_ppu(cpu, 4);
+        cpu.bus_cycles += 4;
         return;
     }
-    if (cpu.oam_dma_bus_blocked && address != 0xFF46 && !(address >= HRAM_START && address <= HRAM_END))
-    {
-        return;
-    }
-
-    if (address == 0xFF46)
-    {
-        cpu.memory[address] = value;
-        cpu.oam_dma_source = value;
-        cpu.oam_dma_index = 0;
-        cpu.oam_dma_cycle_phase = 0;
-        cpu.oam_dma_active = true;
-        cpu.oam_dma_bus_blocked = false;
-        cpu.oam_dma_startup_delay = 4;
-        cpu.oam_dma_first_byte_delay = 4;
-        return;
-    }
-
-    if (address == JOYP_REG)
-    {
-        const uint8_t old_lines = joypad_lines(cpu);
-        cpu.memory[JOYP_REG] = value & 0x30;
-        request_joypad_interrupt_on_falling_edge(cpu, old_lines);
-        return;
-    }
-
-    if (address == SC_REG)
-    {
-        cpu.memory[SC_REG] = value & 0x81;
-        cpu.serial_transfer_active = (value & 0x80) != 0;
-        cpu.serial_internal_clock = (value & 0x01) != 0;
-        cpu.serial_cycles_remaining = cpu.serial_transfer_active && cpu.serial_internal_clock
-                                          ? static_cast<uint16_t>(4096 - (cpu.serial_divider_accumulator & 0x01FF))
-                                          : 0;
-        if (cpu.serial_transfer_active)
-        {
-            cpu.serial_shift_register = cpu.memory[SB_REG];
-        }
-        return;
-    }
-
-    if (address == 0xFF0F)
-    {
-        cpu.memory[address] = value & 0x1F;
-        return;
-    }
-
-    if (address == 0xFF41)
-    {
-        cpu.memory[address] = static_cast<uint8_t>((cpu.memory[address] & 0x07) | (value & 0x78));
-        return;
-    }
-
-    if (address == 0xFF04)
-    {
-        reset_divider(cpu);
-        return;
-    }
-
-    if (address == 0xFF05)
-    {
-        if (cpu.tima_reload_delay == 1 || cpu.tima_reloaded_this_cycle)
-        {
-            return;
-        }
-        if (cpu.tima_reload_delay > 1)
-        {
-            cpu.tima_reload_delay = 0;
-        }
-        cpu.memory[address] = value;
-        return;
-    }
-
-    if (address == 0xFF06)
-    {
-        cpu.memory[address] = value;
-        if (cpu.tima_reloaded_this_cycle)
-        {
-            cpu.memory[0xFF05] = value;
-        }
-        return;
-    }
-
-    if (address == 0xFF07)
-    {
-        write_timer_control(cpu, value);
-        return;
-    }
-
-    if (address < 0x8000)
-    {
-        if (!cpu.cartridge_rom.empty())
-        {
-            if (cpu.cartridge_mbc5)
-            {
-                if (address < 0x2000)
-                {
-                    cpu.cart_ram_enabled = !cpu.cartridge_ram.empty() && (value & 0x0F) == 0x0A;
-                }
-                else if (address < 0x3000)
-                {
-                    cpu.mbc5_rom_bank = static_cast<uint16_t>((cpu.mbc5_rom_bank & 0x100) | value);
-                }
-                else if (address < 0x4000)
-                {
-                    cpu.mbc5_rom_bank = static_cast<uint16_t>((cpu.mbc5_rom_bank & 0xFF) | ((value & 0x01) << 8));
-                }
-                else if (address < 0x6000)
-                {
-                    cpu.mbc5_ram_bank = value & 0x0F;
-                }
-            }
-            else if (cpu.cartridge_mbc2)
-            {
-                // Address bit 8 selects RAMG or ROMB; $4000-$7FFF is not decoded.
-                if (address < 0x4000 && (address & 0x0100) == 0)
-                {
-                    cpu.cart_ram_enabled = (value & 0x0F) == 0x0A;
-                }
-                else if (address < 0x4000)
-                {
-                    cpu.mbc2_rom_bank = value & 0x0F;
-                    if (cpu.mbc2_rom_bank == 0)
-                    {
-                        cpu.mbc2_rom_bank = 1;
-                    }
-                }
-            }
-            else if (cpu.cartridge_mbc1)
-            {
-                if (address < 0x2000)
-                {
-                    cpu.cart_ram_enabled = !cpu.cartridge_ram.empty() && (value & 0x0F) == 0x0A;
-                }
-                else if (address < 0x4000)
-                {
-                    cpu.mbc1_rom_bank_low = value & 0x1F;
-                    if (cpu.mbc1_rom_bank_low == 0)
-                    {
-                        cpu.mbc1_rom_bank_low = 1;
-                    }
-                }
-                else if (address < 0x6000)
-                {
-                    cpu.mbc1_bank_high = value & 0x03;
-                }
-                else
-                {
-                    cpu.mbc1_banking_mode = value & 0x01;
-                }
-            }
-            return;
-        }
-
-        if ((address & 0x1FFF) == 0x0000)
-        {
-            cpu.cart_ram_enabled = (value & 0x0F) == 0x0A;
-        }
-        return;
-    }
-
-    if (address >= 0xA000 && address < 0xC000 && !cpu.cartridge_rom.empty())
-    {
-        if ((cpu.cartridge_mbc1 || cpu.cartridge_mbc2 || cpu.cartridge_mbc5) && cpu.cart_ram_enabled &&
-            !cpu.cartridge_ram.empty())
-        {
-            cpu.cartridge_ram[cartridge_ram_index(cpu, address)] =
-                cpu.cartridge_mbc2 ? static_cast<uint8_t>(value & 0x0F) : value;
-        }
-        return;
-    }
-
-    if (address >= VRAM_START && address <= VRAM_END && cpu.vram_write_locked)
-    {
-        return;
-    }
-
-    if (address >= OAM_START && address <= OAM_END && cpu.oam_write_locked)
-    {
-        return;
-    }
-
-    if (address >= OAM_UNUSABLE_START && address <= OAM_UNUSABLE_END)
-    {
-        return;
-    }
-
-    // Echo RAM mapping (WRAM mirror from 0xC000-0xDFFF to 0xE000-0xFDFF)
-    if (address >= ECHO_START && address <= ECHO_END)
-    {
-        address -= 0x2000;
-    }
-
-    cpu.memory[address] = value;
+    write_memory(cpu, address, value);
 }
 
 void cpu_set_joypad_button(CPU_LR35902 &cpu, JoypadButton button, bool pressed)

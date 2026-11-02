@@ -56,16 +56,12 @@ namespace
         }
         cpu.memory[STAT] = stat;
 
-        // Around the mode 2/3 boundary the CPU's read and write accesses are
-        // blocked at different dots: VRAM reads lock at dot 80, just before STAT
-        // reports mode 3, while OAM writes slip through until mode 3 starts and
-        // during the first four dots of each line.
+        // VRAM reads lock at dot 80, just before STAT reports mode 3. Writes are
+        // checked separately by ppu_blocks_vram_write and ppu_blocks_oam_write.
         const bool late_mode2 = mode == 2 && ppu.cycles_into_line >= 80;
         cpu.vram_locked = ppu.lcd_enabled && (mode == 3 || late_mode2);
-        cpu.vram_write_locked = ppu.lcd_enabled && mode == 3;
         cpu.oam_locked = ppu.lcd_enabled &&
                          (mode == 2 || mode == 3 || ppu.line_start_hold);
-        cpu.oam_write_locked = ppu.lcd_enabled && ((mode == 2 && !late_mode2) || mode == 3);
 
         // The mode 2 interrupt is raised as LY changes, before STAT reports
         // mode 2, and the mode 0 interrupt one dot before STAT reports mode 0.
@@ -382,8 +378,6 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         cpu.memory[STAT] &= 0xFC; // Freeze LY=LYC while the LCD clock is stopped.
         cpu.vram_locked = false;
         cpu.oam_locked = false;
-        cpu.vram_write_locked = false;
-        cpu.oam_write_locked = false;
         return;
     }
 
@@ -498,5 +492,51 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         {
             advance_scanline(cpu, ppu);
         }
+    }
+}
+
+// CPU writes land at the start of their M-cycle, four dots before the PPU state
+// that blocks them. VRAM writes are blocked while mode 3 is drawing. OAM writes
+// are blocked during mode 2 and mode 3, except for the four dots before mode 3
+// starts and the first four dots of each line.
+bool ppu_blocks_vram_write(const PPU_LR35902 &ppu)
+{
+    constexpr int WRITE_LEAD = 4;
+    const int dot = ppu.cycles_into_line + WRITE_LEAD;
+    if (!ppu.lcd_enabled)
+    {
+        return false;
+    }
+    switch (ppu.mode)
+    {
+    case 3:
+        return dot < ppu.mode3_end;
+    case 2:
+        return dot >= MODE3_START;
+    case 0:
+        return ppu.startup_mode0 && dot >= STARTUP_MODE3_START;
+    default:
+        return false;
+    }
+}
+
+bool ppu_blocks_oam_write(const PPU_LR35902 &ppu)
+{
+    constexpr int WRITE_LEAD = 4;
+    const int dot = ppu.cycles_into_line + WRITE_LEAD;
+    if (!ppu.lcd_enabled)
+    {
+        return false;
+    }
+    switch (ppu.mode)
+    {
+    case 3:
+        return dot < ppu.mode3_end;
+    case 2:
+        return dot < 80 || dot >= MODE3_START;
+    case 0:
+        return ppu.line_start_hold || (ppu.startup_mode0 && dot >= STARTUP_MODE3_START);
+    default:
+        return false;
     }
 }

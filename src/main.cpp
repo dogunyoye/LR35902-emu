@@ -269,6 +269,7 @@ int main(int argc, char **argv)
     }
 
     PPU_LR35902 ppu{};
+    cpu.ppu = &ppu;
     bool running = true;
     int cycle_accumulator = 0;
 
@@ -299,7 +300,6 @@ int main(int argc, char **argv)
         while (running && !cpu.stopped && cycle_accumulator < CYCLES_PER_FRAME)
         {
             const int cycles = step_cpu(cpu);
-            update_ppu(cpu, ppu, cycles);
             cycle_accumulator += cycles;
         }
         if (!running)

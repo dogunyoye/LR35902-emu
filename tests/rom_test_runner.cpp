@@ -61,138 +61,6 @@ namespace
         return true;
     }
 
-    int ppu_write_cycle(CPU_LR35902 &cpu, std::uint8_t opcode)
-    {
-        std::uint16_t address = 0;
-        int access_cycle = 0;
-        switch (opcode)
-        {
-        case 0xE0:
-            address = static_cast<std::uint16_t>(0xFF00u + cpu_read(cpu, static_cast<std::uint16_t>(cpu.pc + 1)));
-            access_cycle = 8;
-            break;
-        case 0xEA:
-            address = cpu_read16(cpu, static_cast<std::uint16_t>(cpu.pc + 1));
-            access_cycle = 12;
-            break;
-        case 0xE2:
-            address = static_cast<std::uint16_t>(0xFF00u + cpu.bc.reg8.low);
-            access_cycle = address == 0xFF44 ? 8 : 4;
-            break;
-        case 0x02:
-            address = cpu.bc.reg16;
-            access_cycle = (address >= 0x8000 && address <= 0x9FFF) ||
-                                   (address >= 0xFE00 && address <= 0xFE9F)
-                               ? 8
-                               : 4;
-            break;
-        case 0x12:
-            address = cpu.de.reg16;
-            access_cycle = (address >= 0x8000 && address <= 0x9FFF) ||
-                                   (address >= 0xFE00 && address <= 0xFE9F)
-                               ? 8
-                               : 4;
-            break;
-        case 0x22:
-        case 0x32:
-            address = cpu.hl.reg16;
-            access_cycle = (address >= 0x8000 && address <= 0x9FFF) ||
-                                   (address >= 0xFE00 && address <= 0xFE9F)
-                               ? 8
-                               : 4;
-            break;
-        case 0x77:
-            address = cpu.hl.reg16;
-            access_cycle = (address >= 0x8000 && address <= 0x9FFF) ||
-                                   (address >= 0xFE00 && address <= 0xFE9F)
-                               ? 8
-                               : 4;
-            break;
-        case 0x36:
-            address = cpu.hl.reg16;
-            access_cycle = 8;
-            break;
-        case 0xCB:
-        {
-            const uint8_t cb_opcode = cpu_read(cpu, static_cast<uint16_t>(cpu.pc + 1));
-            const uint8_t operation = cb_opcode >> 6;
-            if ((cb_opcode & 0x07) == 6 && operation >= 2)
-            {
-                address = cpu.hl.reg16;
-                access_cycle = 12;
-            }
-            break;
-        }
-        default:
-            return 0;
-        }
-
-        const bool ppu_register = address >= 0xFF40 && address <= 0xFF4B;
-        const bool ppu_memory = (address >= 0x8000 && address <= 0x9FFF) ||
-                                (address >= 0xFE00 && address <= 0xFE9F);
-        return ppu_register || ppu_memory ? access_cycle : 0;
-    }
-
-    // Reads sample the PPU at the end of the M-cycle that performs the access.
-    int ppu_read_cycle(CPU_LR35902 &cpu, std::uint8_t opcode)
-    {
-        std::uint16_t address = 0;
-        int access_cycle = 0;
-        if ((opcode >= 0x40 && opcode <= 0x7F) && opcode != 0x76 && (opcode & 0x07) == 0x06)
-        {
-            address = cpu.hl.reg16;
-            access_cycle = 8;
-        }
-        else
-        {
-            switch (opcode)
-            {
-            case 0x0A:
-                address = cpu.bc.reg16;
-                access_cycle = 8;
-                break;
-            case 0x1A:
-                address = cpu.de.reg16;
-                access_cycle = 8;
-                break;
-            case 0x2A:
-            case 0x3A:
-                address = cpu.hl.reg16;
-                access_cycle = 8;
-                break;
-            case 0xF0:
-                address = static_cast<std::uint16_t>(0xFF00u + cpu_read(cpu, static_cast<std::uint16_t>(cpu.pc + 1)));
-                access_cycle = 12;
-                break;
-            case 0xF2:
-                address = static_cast<std::uint16_t>(0xFF00u + cpu.bc.reg8.low);
-                access_cycle = 8;
-                break;
-            case 0xFA:
-                address = cpu_read16(cpu, static_cast<std::uint16_t>(cpu.pc + 1));
-                access_cycle = 16;
-                break;
-            case 0xCB:
-            {
-                const std::uint8_t cb_opcode = cpu_read(cpu, static_cast<std::uint16_t>(cpu.pc + 1));
-                if ((cb_opcode & 0x07) == 6)
-                {
-                    address = cpu.hl.reg16;
-                    access_cycle = 12;
-                }
-                break;
-            }
-            default:
-                break;
-            }
-        }
-
-        const bool ppu_register = address >= 0xFF40 && address <= 0xFF4B;
-        const bool ppu_memory = (address >= 0x8000 && address <= 0x9FFF) ||
-                                (address >= 0xFE00 && address <= 0xFE9F);
-        return ppu_register || ppu_memory ? access_cycle : 0;
-    }
-
     bool has_mooneye_pass_signature(const CPU_LR35902 &cpu)
     {
         return cpu.bc.reg8.high == 3 && cpu.bc.reg8.low == 5 &&
@@ -320,6 +188,7 @@ int main(int argc, char **argv)
 
     std::uint64_t cycles_run = 0;
     PPU_LR35902 ppu{};
+    cpu.ppu = &ppu;
     if (model == GameBoyModel::Dmg0)
     {
         cpu.memory[0xFF41] = 0x81;
@@ -335,18 +204,12 @@ int main(int argc, char **argv)
     {
         const uint16_t pc_before = cpu.pc;
         const uint8_t opcode = cpu_read(cpu, pc_before);
-        const int ppu_access_cycle = std::max(ppu_write_cycle(cpu, opcode), ppu_read_cycle(cpu, opcode));
-        if (ppu_access_cycle != 0)
-        {
-            update_ppu(cpu, ppu, ppu_access_cycle);
-        }
         const int cycles = step_cpu(cpu);
         if (cycles <= 0)
         {
             break;
         }
         cycles_run += static_cast<std::uint64_t>(cycles);
-        update_ppu(cpu, ppu, cycles - ppu_access_cycle);
 
         if (cpu.serial_output.size() > output_written)
         {
@@ -420,7 +283,7 @@ int main(int argc, char **argv)
               << " serial-bytes=" << std::dec << cpu.serial_output.size()
               << " transfer-active=" << cpu.serial_transfer_active
               << " OAM-DMA=" << cpu.oam_dma_active << ':' << cpu.oam_dma_index
-              << ':' << static_cast<unsigned>(cpu.oam_dma_startup_delay)
+              << ':' << static_cast<unsigned>(cpu.oam_dma_start_delay)
               << " AF/BC/DE/HL/SP=" << cpu.af.reg16 << '/' << cpu.bc.reg16 << '/'
               << cpu.de.reg16 << '/' << cpu.hl.reg16 << '/' << cpu.sp << '\n';
     return 2;

@@ -32,3 +32,6 @@ struct PPU_LR35902
 };
 
 void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles);
+// Whether a CPU write landing now is blocked by the PPU.
+bool ppu_blocks_vram_write(const PPU_LR35902 &ppu);
+bool ppu_blocks_oam_write(const PPU_LR35902 &ppu);

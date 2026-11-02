@@ -25,11 +25,14 @@ static void test_ppu_modes_scanlines_and_background()
     assert(ppu.framebuffer[0] == 0xFF88C070);
     assert(ppu.framebuffer[1] == 0xFFE0F8D0);
 
-    update_ppu(cpu, ppu, 203);
+    update_ppu(cpu, ppu, 199);
+    assert(!ppu_blocks_oam_write(ppu)); // Writes land four dots ahead, still in the next line's first dots
+
+    update_ppu(cpu, ppu, 4);
     assert(cpu.memory[0xFF44] == 1);
     assert((cpu.memory[0xFF41] & 0x03) == 0); // Mode 2 is reported four dots after LY changes
     assert(cpu.oam_locked);
-    assert(!cpu.oam_write_locked);
+    assert(ppu_blocks_oam_write(ppu));
 
     update_ppu(cpu, ppu, 4);
     assert((cpu.memory[0xFF41] & 0x03) == 2);

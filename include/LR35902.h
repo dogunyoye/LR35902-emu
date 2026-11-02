@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+struct PPU_LR35902;
+
 union RegPair
 {
     uint16_t reg16;
@@ -33,19 +35,20 @@ struct CPU_LR35902
     uint16_t div_cycle_accumulator = 0;
     uint8_t tima_reload_delay = 0;
     bool tima_reloaded_this_cycle = false;
+    // OAM DMA copies one byte per M-cycle while active. A write to $FF46
+    // starts (or restarts) a transfer two M-cycles later.
     bool oam_dma_active = false;
-    bool oam_dma_bus_blocked = false;
     uint8_t oam_dma_source = 0;
     uint16_t oam_dma_index = 0;
     uint8_t oam_dma_cycle_phase = 0;
-    uint8_t oam_dma_startup_delay = 0;
-    uint8_t oam_dma_first_byte_delay = 0;
-    bool cpu_instruction_active = false;
-    int cpu_instruction_dma_cycles = 0;
-    int cpu_instruction_timer_cycles = 0;
-    int oam_dma_push_prewrite_cycles = 0;
-    int oam_dma_pop_preread_cycles = 0;
-    int oam_dma_pop_interbyte_cycles = 4;
+    uint8_t oam_dma_start_delay = 0;
+    uint8_t oam_dma_pending_source = 0;
+    // While an instruction executes, each memory access advances the
+    // peripherals by one M-cycle; bus_cycles counts the T-cycles advanced.
+    bool bus_ticking = false;
+    int bus_cycles = 0;
+    // PPU advanced alongside the CPU, if any.
+    PPU_LR35902 *ppu = nullptr;
     uint16_t serial_cycles_remaining = 0;
     uint8_t joypad_buttons = 0xFF;
     uint8_t serial_shift_register = 0xFF;
@@ -68,8 +71,6 @@ struct CPU_LR35902
     uint8_t mbc5_ram_bank = 0;
     bool vram_locked = false;
     bool oam_locked = false;
-    bool vram_write_locked = false;
-    bool oam_write_locked = false;
     std::vector<uint8_t> cartridge_rom;
     std::vector<uint8_t> cartridge_ram;
     std::string serial_output;
@@ -132,9 +133,8 @@ uint16_t cpu_read16(CPU_LR35902 &cpu, uint16_t address);
 void cpu_push16(CPU_LR35902 &cpu, uint16_t val);
 uint16_t cpu_pop16(CPU_LR35902 &cpu);
 void update_timers(CPU_LR35902 &cpu, int cycles);
-void advance_timers_for_cpu_instruction(CPU_LR35902 &cpu, int cycles);
 void update_oam_dma(CPU_LR35902 &cpu, int cycles);
-void advance_oam_dma_for_cpu_instruction(CPU_LR35902 &cpu, int cycles);
+void tick_peripherals(CPU_LR35902 &cpu, int cycles);
 void reset_divider(CPU_LR35902 &cpu);
 void write_timer_control(CPU_LR35902 &cpu, uint8_t value);
 void update_serial(CPU_LR35902 &cpu, int cycles);

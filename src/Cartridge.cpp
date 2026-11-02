@@ -154,7 +154,7 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     cpu.hl.reg16 = 0x014D;
     cpu.sp = 0xFFFE;
     cpu.pc = 0x0100;
-    cpu.div_cycle_accumulator = 0xABCC;
+    cpu.div_cycle_accumulator = 0xABC8;
     cpu.memory[0xFF04] = 0xAB;
     cpu.serial_divider_accumulator = 460; // DMG ABC/MGB post-boot serial clock phase.
     cpu.memory[0xFF00] = 0xCF;
@@ -195,7 +195,7 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
         cpu.bc.reg16 = 0xFF13;
         cpu.de.reg16 = 0x00C1;
         cpu.hl.reg16 = 0x8403;
-        cpu.div_cycle_accumulator = 0x1830;
+        cpu.div_cycle_accumulator = 0x182C;
         cpu.memory[0xFF04] = 0x18;
         break;
     case GameBoyModel::Mgb:
@@ -208,7 +208,7 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
         cpu.hl.reg16 = 0xC060;
         cpu.memory[0xFF00] = 0xFF;
         cpu.memory[0xFF26] = 0xF0;
-        cpu.div_cycle_accumulator = global_checksum == 0x96A7 ? 0xD850 : 0xD860;
+        cpu.div_cycle_accumulator = global_checksum == 0x96A7 ? 0xD84C : 0xD85C;
         cpu.memory[0xFF04] = 0xD8;
         break;
     case GameBoyModel::Sgb2:
@@ -218,7 +218,7 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
         cpu.hl.reg16 = 0xC060;
         cpu.memory[0xFF00] = 0xFF;
         cpu.memory[0xFF26] = 0xF0;
-        cpu.div_cycle_accumulator = global_checksum == 0x96A7 ? 0xD850 : 0xD860;
+        cpu.div_cycle_accumulator = global_checksum == 0x96A7 ? 0xD84C : 0xD85C;
         cpu.memory[0xFF04] = 0xD8;
         break;
     case GameBoyModel::DmgABC:

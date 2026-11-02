@@ -391,21 +391,13 @@ namespace
         set_c_flag(cpu, total > 0xFFFFu);
     }
 
-    void advance_oam_dma_to_instruction_cycle(CPU_LR35902 &cpu, int cycle)
+    // An M-cycle with no memory access.
+    void tick_internal_cycle(CPU_LR35902 &cpu)
     {
-        if (cpu.cpu_instruction_active && cpu.cpu_instruction_dma_cycles < cycle)
+        if (cpu.bus_ticking)
         {
-            advance_oam_dma_for_cpu_instruction(cpu, cycle - cpu.cpu_instruction_dma_cycles);
+            tick_peripherals(cpu, 4);
         }
-    }
-
-    uint16_t read_immediate16_with_dma_timing(CPU_LR35902 &cpu)
-    {
-        advance_oam_dma_to_instruction_cycle(cpu, 3);
-        const uint8_t low = cpu_read(cpu, cpu.pc);
-        advance_oam_dma_to_instruction_cycle(cpu, 7);
-        const uint8_t high = cpu_read(cpu, static_cast<uint16_t>(cpu.pc + 1));
-        return static_cast<uint16_t>(low | (high << 8));
     }
 
     uint16_t add_sp_offset(CPU_LR35902 &cpu, uint8_t offset)
@@ -428,18 +420,12 @@ uint16_t cpu_read16(CPU_LR35902 &cpu, uint16_t address)
 }
 
 // Push a 16-bit value onto the stack (SP decrements by 2)
+// Every push (PUSH, CALL, RST) spends an internal M-cycle before writing.
 void cpu_push16(CPU_LR35902 &cpu, uint16_t val)
 {
-    if (cpu.cpu_instruction_active)
-    {
-        advance_oam_dma_for_cpu_instruction(cpu, cpu.oam_dma_push_prewrite_cycles);
-    }
+    tick_internal_cycle(cpu);
     --cpu.sp;
     cpu_write(cpu, cpu.sp, static_cast<uint8_t>(val >> 8));
-    if (cpu.cpu_instruction_active)
-    {
-        advance_oam_dma_for_cpu_instruction(cpu, 4);
-    }
     --cpu.sp;
     cpu_write(cpu, cpu.sp, static_cast<uint8_t>(val));
 }
@@ -447,18 +433,7 @@ void cpu_push16(CPU_LR35902 &cpu, uint16_t val)
 // Pop a 16-bit value off the stack (SP increments by 2)
 uint16_t cpu_pop16(CPU_LR35902 &cpu)
 {
-    if (cpu.cpu_instruction_active)
-    {
-        advance_oam_dma_for_cpu_instruction(cpu, cpu.oam_dma_pop_preread_cycles);
-        advance_timers_for_cpu_instruction(cpu, cpu.oam_dma_pop_preread_cycles);
-    }
     uint8_t low = cpu_read(cpu, cpu.sp);
-    if (cpu.cpu_instruction_active)
-    {
-        const int high_byte_cycle = cpu.oam_dma_pop_interbyte_cycles;
-        advance_oam_dma_for_cpu_instruction(cpu, high_byte_cycle);
-        advance_timers_for_cpu_instruction(cpu, high_byte_cycle);
-    }
     uint8_t high = cpu_read(cpu, cpu.sp + 1);
     cpu.sp += 2;
     return static_cast<uint16_t>((high << 8) | low);
@@ -467,7 +442,11 @@ uint16_t cpu_pop16(CPU_LR35902 &cpu)
 int execute_instruction(CPU_LR35902 &cpu)
 {
     const uint8_t pending_ime_enable = cpu.ime_enable_delay;
+    // step_cpu has already ticked the opcode fetch M-cycle.
+    const bool bus_ticking = cpu.bus_ticking;
+    cpu.bus_ticking = false;
     const uint8_t opcode = cpu_read(cpu, cpu.pc);
+    cpu.bus_ticking = bus_ticking;
     if (cpu.halt_bug)
     {
         cpu.halt_bug = false;
@@ -1100,7 +1079,7 @@ int execute_instruction(CPU_LR35902 &cpu)
 
     case 0xC2: // JP NZ, a16
     {
-        const uint16_t target = read_immediate16_with_dma_timing(cpu);
+        const uint16_t target = cpu_read16(cpu, cpu.pc);
         cpu.pc += 2;
         if (!get_flag(cpu, FLAG_Z))
         {
@@ -1112,14 +1091,14 @@ int execute_instruction(CPU_LR35902 &cpu)
     }
 
     case 0xC3: // JP a16
-        cpu.pc = read_immediate16_with_dma_timing(cpu);
+        cpu.pc = cpu_read16(cpu, cpu.pc);
         cycles = 16;
         break;
 
     case 0xC4: // CALL NZ, a16
         if (!get_flag(cpu, FLAG_Z))
         {
-            const uint16_t target = read_immediate16_with_dma_timing(cpu);
+            const uint16_t target = cpu_read16(cpu, cpu.pc);
             cpu.pc += 2;
             cpu_push16(cpu, cpu.pc);
             cpu.pc = target;
@@ -1135,7 +1114,7 @@ int execute_instruction(CPU_LR35902 &cpu)
     case 0xCC: // CALL Z, a16
         if (get_flag(cpu, FLAG_Z))
         {
-            const uint16_t target = read_immediate16_with_dma_timing(cpu);
+            const uint16_t target = cpu_read16(cpu, cpu.pc);
             cpu.pc += 2;
             cpu_push16(cpu, cpu.pc);
             cpu.pc = target;
@@ -1171,7 +1150,7 @@ int execute_instruction(CPU_LR35902 &cpu)
 
     case 0xCA: // JP Z, a16
     {
-        const uint16_t target = read_immediate16_with_dma_timing(cpu);
+        const uint16_t target = cpu_read16(cpu, cpu.pc);
         cpu.pc += 2;
         if (get_flag(cpu, FLAG_Z))
         {
@@ -1194,7 +1173,7 @@ int execute_instruction(CPU_LR35902 &cpu)
 
     case 0xCD: // CALL a16
     {
-        const uint16_t target = read_immediate16_with_dma_timing(cpu);
+        const uint16_t target = cpu_read16(cpu, cpu.pc);
         cpu.pc += 2;
         cpu_push16(cpu, cpu.pc);
         cpu.pc = target;
@@ -1218,6 +1197,7 @@ int execute_instruction(CPU_LR35902 &cpu)
     case 0xD0: // RET NC
         if (!get_flag(cpu, FLAG_C))
         {
+            tick_internal_cycle(cpu); // Condition check
             cpu.pc = cpu_pop16(cpu);
             cycles = 20;
         }
@@ -1229,7 +1209,7 @@ int execute_instruction(CPU_LR35902 &cpu)
 
     case 0xD2: // JP NC, a16
     {
-        const uint16_t target = read_immediate16_with_dma_timing(cpu);
+        const uint16_t target = cpu_read16(cpu, cpu.pc);
         cpu.pc += 2;
         if (!get_flag(cpu, FLAG_C)) { cpu.pc = target; cycles = 16; }
         else cycles = 12;
@@ -1239,7 +1219,7 @@ int execute_instruction(CPU_LR35902 &cpu)
     case 0xD4: // CALL NC, a16
         if (!get_flag(cpu, FLAG_C))
         {
-            const uint16_t target = read_immediate16_with_dma_timing(cpu);
+            const uint16_t target = cpu_read16(cpu, cpu.pc);
             cpu.pc += 2;
             cpu_push16(cpu, cpu.pc);
             cpu.pc = target;
@@ -1275,7 +1255,7 @@ int execute_instruction(CPU_LR35902 &cpu)
 
     case 0xDA: // JP C, a16
     {
-        const uint16_t target = read_immediate16_with_dma_timing(cpu);
+        const uint16_t target = cpu_read16(cpu, cpu.pc);
         cpu.pc += 2;
         if (get_flag(cpu, FLAG_C)) { cpu.pc = target; cycles = 16; }
         else cycles = 12;
@@ -1285,7 +1265,7 @@ int execute_instruction(CPU_LR35902 &cpu)
     case 0xDC: // CALL C, a16
         if (get_flag(cpu, FLAG_C))
         {
-            const uint16_t target = read_immediate16_with_dma_timing(cpu);
+            const uint16_t target = cpu_read16(cpu, cpu.pc);
             cpu.pc += 2;
             cpu_push16(cpu, cpu.pc);
             cpu.pc = target;
@@ -1344,7 +1324,6 @@ int execute_instruction(CPU_LR35902 &cpu)
     }
 
     case 0xE8: // ADD SP, e8
-        advance_oam_dma_to_instruction_cycle(cpu, 0);
         cpu.sp = add_sp_offset(cpu, cpu_read(cpu, cpu.pc++));
         cycles = 16;
         break;
@@ -1405,7 +1384,6 @@ int execute_instruction(CPU_LR35902 &cpu)
     }
 
     case 0xF8: // LD HL, SP+e8
-        advance_oam_dma_to_instruction_cycle(cpu, 0);
         cpu.hl.reg16 = add_sp_offset(cpu, cpu_read(cpu, cpu.pc++));
         cycles = 12;
         break;
@@ -1514,6 +1492,7 @@ int execute_instruction(CPU_LR35902 &cpu)
     case 0xC0: // RET NZ
         if (!get_flag(cpu, FLAG_Z))
         {
+            tick_internal_cycle(cpu); // Condition check
             cpu.pc = cpu_pop16(cpu);
             cycles = 20;
         }
@@ -1526,6 +1505,7 @@ int execute_instruction(CPU_LR35902 &cpu)
     case 0xC8: // RET Z
         if (get_flag(cpu, FLAG_Z))
         {
+            tick_internal_cycle(cpu); // Condition check
             cpu.pc = cpu_pop16(cpu);
             cycles = 20;
         }
@@ -1538,6 +1518,7 @@ int execute_instruction(CPU_LR35902 &cpu)
     case 0xD8: // RET C
         if (get_flag(cpu, FLAG_C))
         {
+            tick_internal_cycle(cpu); // Condition check
             cpu.pc = cpu_pop16(cpu);
             cycles = 20;
         }
@@ -1584,8 +1565,7 @@ int step_cpu(CPU_LR35902 &cpu)
 {
     constexpr uint16_t INTERRUPT_ENABLE = 0xFFFF;
     constexpr uint16_t INTERRUPT_FLAGS = 0xFF0F;
-    const uint8_t pending_interrupts = static_cast<uint8_t>(
-        cpu.memory[INTERRUPT_ENABLE] & cpu.memory[INTERRUPT_FLAGS] & 0x1F);
+    constexpr uint8_t TIMER_INTERRUPT = 0x04;
 
     if (cpu.stopped)
     {
@@ -1594,145 +1574,75 @@ int step_cpu(CPU_LR35902 &cpu)
 
     if (cpu.halted)
     {
-        if (pending_interrupts == 0)
+        if ((cpu.memory[INTERRUPT_ENABLE] & cpu.memory[INTERRUPT_FLAGS] & 0x1F) == 0)
         {
-            update_timers(cpu, 4);
-            update_oam_dma(cpu, 4);
-            update_serial(cpu, 4);
+            tick_peripherals(cpu, 4);
             return 4;
         }
         cpu.halted = false;
     }
 
+    // Interrupts are sampled during the opcode fetch M-cycle. Requests made
+    // before it are seen, as are timer requests, which arrive early in an
+    // M-cycle; PPU requests made during the fetch wait for the next one.
+    cpu.bus_ticking = true;
+    cpu.bus_cycles = 0;
+    const uint8_t flags_before_fetch = cpu.memory[INTERRUPT_FLAGS];
+    tick_peripherals(cpu, 4);
+    const uint8_t early_flags = cpu.memory[INTERRUPT_FLAGS] & ~flags_before_fetch & TIMER_INTERRUPT;
+    const uint8_t pending_interrupts = static_cast<uint8_t>(
+        cpu.memory[INTERRUPT_ENABLE] & (flags_before_fetch | early_flags) & 0x1F);
+
+    int cycles;
     if (cpu.ime && pending_interrupts != 0)
     {
+        // Dispatch discards the fetched opcode, spends two internal M-cycles,
+        // and pushes PC. IE is sampled during the low-byte push, so overwriting
+        // it with the high byte of PC can cancel the dispatch and jump to $0000.
         cpu.ime = false;
         cpu.ime_enable_delay = 0;
+        tick_internal_cycle(cpu);
+        tick_internal_cycle(cpu);
 
         const uint16_t return_address = cpu.pc;
         --cpu.sp;
         cpu_write(cpu, cpu.sp, static_cast<uint8_t>(return_address >> 8));
 
-        const uint8_t pending_after_high_push = static_cast<uint8_t>(
-            cpu.memory[INTERRUPT_ENABLE] & cpu.memory[INTERRUPT_FLAGS] & 0x1F);
+        const uint8_t flags_before_low_push = cpu.memory[INTERRUPT_FLAGS];
+        const uint8_t enable_before_low_push = cpu.memory[INTERRUPT_ENABLE];
         --cpu.sp;
         cpu_write(cpu, cpu.sp, static_cast<uint8_t>(return_address));
+        const uint8_t early_push_flags = cpu.memory[INTERRUPT_FLAGS] & ~flags_before_low_push & TIMER_INTERRUPT;
+        const uint8_t dispatch_interrupts = static_cast<uint8_t>(
+            enable_before_low_push & (flags_before_low_push | early_push_flags) & 0x1F);
 
-        if (pending_after_high_push == 0)
+        if (dispatch_interrupts == 0)
         {
             cpu.pc = 0x0000;
-            update_timers(cpu, 20);
-            update_oam_dma(cpu, 20);
-            update_serial(cpu, 20);
-            return 20;
         }
-
-        uint8_t interrupt_bit = 0;
-        while ((pending_after_high_push & (1u << interrupt_bit)) == 0)
+        else
         {
-            ++interrupt_bit;
+            uint8_t interrupt_bit = 0;
+            while ((dispatch_interrupts & (1u << interrupt_bit)) == 0)
+            {
+                ++interrupt_bit;
+            }
+            cpu.memory[INTERRUPT_FLAGS] &= static_cast<uint8_t>(~(1u << interrupt_bit));
+            cpu.pc = static_cast<uint16_t>(0x0040 + interrupt_bit * 8);
         }
-        cpu.memory[INTERRUPT_FLAGS] &= static_cast<uint8_t>(~(1u << interrupt_bit));
-        cpu.pc = static_cast<uint16_t>(0x0040 + interrupt_bit * 8);
-        update_timers(cpu, 20);
-        update_oam_dma(cpu, 20);
-        update_serial(cpu, 20);
-        return 20;
+        cycles = 20;
+    }
+    else
+    {
+        cycles = execute_instruction(cpu);
     }
 
-    cpu.cpu_instruction_active = true;
-    cpu.cpu_instruction_dma_cycles = 0;
-    cpu.cpu_instruction_timer_cycles = 0;
-    cpu.oam_dma_push_prewrite_cycles = 0;
-    cpu.oam_dma_pop_preread_cycles = 0;
-    cpu.oam_dma_pop_interbyte_cycles = 4;
-    if (cpu.oam_dma_active && cpu.pc >= 0xE000 && cpu.pc <= 0xFDFF)
+    // M-cycles without a memory access that are not ticked explicitly come
+    // at the end of the instruction.
+    while (cpu.bus_cycles < cycles)
     {
-        const uint8_t echo_opcode = cpu.memory[static_cast<uint16_t>(cpu.pc - 0x2000)];
-        if (echo_opcode != 0xE8 && echo_opcode != 0xF8)
-        {
-            advance_oam_dma_for_cpu_instruction(cpu, 4);
-        }
+        tick_internal_cycle(cpu);
     }
-    const uint8_t opcode = cpu_read(cpu, cpu.pc);
-    if (opcode == 0xCD || opcode == 0xC4 || opcode == 0xCC || opcode == 0xD4 || opcode == 0xDC)
-    {
-        cpu.oam_dma_push_prewrite_cycles = 8;
-    }
-    else if (opcode == 0xC5 || opcode == 0xD5 || opcode == 0xE5 || opcode == 0xF5 ||
-             (opcode & 0xC7) == 0xC7)
-    {
-        cpu.oam_dma_push_prewrite_cycles = 4;
-    }
-    if (opcode == 0xC1 || opcode == 0xD1 || opcode == 0xE1 || opcode == 0xF1 ||
-        opcode == 0xC9 || opcode == 0xD9)
-    {
-        cpu.oam_dma_pop_preread_cycles = (opcode == 0xC9 || opcode == 0xD9) ? 4 : 8;
-        if (opcode == 0xC9 || opcode == 0xD9)
-        {
-            cpu.oam_dma_pop_interbyte_cycles = 3;
-        }
-    }
-    else if (opcode == 0xC0 || opcode == 0xC8 || opcode == 0xD0 || opcode == 0xD8)
-    {
-        cpu.oam_dma_pop_preread_cycles = 8;
-        cpu.oam_dma_pop_interbyte_cycles = 3;
-    }
-
-    uint16_t timer_address = 0;
-    int timer_bus_cycle = 0;
-    if (opcode == 0xE0 || opcode == 0xF0) // LDH (a8),A / LDH A,(a8)
-    {
-        timer_address = static_cast<uint16_t>(0xFF00u + cpu_read(cpu, static_cast<uint16_t>(cpu.pc + 1)));
-        timer_bus_cycle = 8;
-    }
-    else if (opcode == 0xE2 || opcode == 0xF2)
-    {
-        timer_address = static_cast<uint16_t>(0xFF00u + cpu.bc.reg8.low);
-        timer_bus_cycle = 8;
-    }
-    else if (opcode == 0x77 || opcode == 0x7E || opcode == 0x36)
-    {
-        timer_address = cpu.hl.reg16;
-        timer_bus_cycle = opcode == 0x36 ? 12 : 8;
-    }
-    else if (opcode == 0x02 || opcode == 0x0A)
-    {
-        timer_address = cpu.bc.reg16;
-        timer_bus_cycle = 8;
-    }
-    else if (opcode == 0x12 || opcode == 0x1A)
-    {
-        timer_address = cpu.de.reg16;
-        timer_bus_cycle = 8;
-    }
-    else if (opcode == 0x22 || opcode == 0x2A || opcode == 0x32 || opcode == 0x3A)
-    {
-        timer_address = cpu.hl.reg16;
-        timer_bus_cycle = 8;
-    }
-    else if (opcode == 0xEA || opcode == 0xFA)
-    {
-        timer_address = cpu_read16(cpu, static_cast<uint16_t>(cpu.pc + 1));
-        timer_bus_cycle = 16;
-    }
-    if (timer_address >= 0xFF04 && timer_address <= 0xFF07)
-    {
-        advance_timers_for_cpu_instruction(cpu, timer_bus_cycle);
-    }
-    if (opcode == 0xE0 && cpu_read(cpu, static_cast<uint16_t>(cpu.pc + 1)) == 0x46)
-    {
-        advance_oam_dma_for_cpu_instruction(cpu, 12);
-    }
-    else if (opcode == 0x77 && cpu.hl.reg16 == 0xFF46) // LD (HL),A
-    {
-        advance_oam_dma_for_cpu_instruction(cpu, 8);
-    }
-
-    const int cycles = execute_instruction(cpu);
-    cpu.cpu_instruction_active = false;
-    update_timers(cpu, cycles - cpu.cpu_instruction_timer_cycles);
-    update_oam_dma(cpu, cycles - cpu.cpu_instruction_dma_cycles);
-    update_serial(cpu, cycles);
+    cpu.bus_ticking = false;
     return cycles;
 }

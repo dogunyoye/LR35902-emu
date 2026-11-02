@@ -104,16 +104,3 @@ void update_timers(CPU_LR35902 &cpu, int cycles)
         }
     }
 }
-
-void advance_timers_for_cpu_instruction(CPU_LR35902 &cpu, int cycles)
-{
-    if (cycles <= 0)
-    {
-        return;
-    }
-    update_timers(cpu, cycles);
-    if (cpu.cpu_instruction_active)
-    {
-        cpu.cpu_instruction_timer_cycles += cycles;
-    }
-}

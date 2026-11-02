@@ -36,21 +36,22 @@ static void test_oam_dma_transfer_and_bus_lock()
     }
 
     cpu_write(cpu, 0xFF46, 0xC0);
-    assert(cpu.oam_dma_active);
-    assert(cpu_read(cpu, 0xC000) == 0x5A);
-    update_oam_dma(cpu, 3);
-    assert(cpu.memory[0xFE00] == 0);
+    assert(!cpu.oam_dma_active);
+    update_oam_dma(cpu, 4);
     assert(cpu_read(cpu, 0xC000) == 0x5A);
 
-    update_oam_dma(cpu, 1);
-    assert(cpu.memory[0xFE00] == 0x5A);
+    update_oam_dma(cpu, 4); // The transfer starts two M-cycles after the write
+    assert(cpu.oam_dma_active);
+    assert(cpu.memory[0xFE00] == 0);
     assert(cpu_read(cpu, 0xC000) == 0xFF);
     assert(cpu_read(cpu, 0xFF80) == 0);
 
-    update_oam_dma(cpu, 636);
+    update_oam_dma(cpu, 4);
+    assert(cpu.memory[0xFE00] == 0x5A);
+
+    update_oam_dma(cpu, 159 * 4);
     assert(!cpu.oam_dma_active);
     assert(cpu.oam_dma_index == 0xA0);
-    assert(!cpu.oam_dma_bus_blocked);
     for (std::uint16_t index = 0; index < 0xA0; ++index)
     {
         assert(cpu.memory[0xFE00 + index] == static_cast<std::uint8_t>(index ^ 0x5A));
@@ -64,7 +65,7 @@ static void test_oam_dma_fe_source_uses_echo_bus()
     cpu.memory[0xDE00] = 0xC2;
     cpu.memory[0xDE01] = 0xD5;
     cpu_write(cpu, 0xFF46, 0xFE);
-    update_oam_dma(cpu, 12);
+    update_oam_dma(cpu, 16); // Two M-cycles to start, then one byte per M-cycle
     assert(cpu.memory[0xFE00] == 0xC2);
     assert(cpu.memory[0xFE01] == 0xD5);
 }
