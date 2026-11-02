@@ -130,16 +130,15 @@ namespace
         return ppu_register || ppu_memory ? access_cycle : 0;
     }
 
-    int ppu_read_cycle(CPU_LR35902 &cpu, PPU_LR35902 &ppu, std::uint8_t opcode)
+    // Reads sample the PPU at the end of the M-cycle that performs the access.
+    int ppu_read_cycle(CPU_LR35902 &cpu, std::uint8_t opcode)
     {
         std::uint16_t address = 0;
         int access_cycle = 0;
-        const int ly_read_cycle = ppu.startup_first_line && !ppu.startup_first_enable ? 12 : 8;
-        const int stat_read_cycle = ppu.startup_first_line && !ppu.startup_first_enable ? 8 : 4;
         if ((opcode >= 0x40 && opcode <= 0x7F) && opcode != 0x76 && (opcode & 0x07) == 0x06)
         {
             address = cpu.hl.reg16;
-            access_cycle = address == 0xFF44 ? ly_read_cycle : (address == 0xFF41 ? stat_read_cycle : 4);
+            access_cycle = 8;
         }
         else
         {
@@ -147,20 +146,20 @@ namespace
             {
             case 0x0A:
                 address = cpu.bc.reg16;
-                access_cycle = address == 0xFF44 ? ly_read_cycle : (address == 0xFF41 ? stat_read_cycle : 4);
+                access_cycle = 8;
                 break;
             case 0x1A:
                 address = cpu.de.reg16;
-                access_cycle = address == 0xFF44 ? ly_read_cycle : (address == 0xFF41 ? stat_read_cycle : 4);
+                access_cycle = 8;
                 break;
             case 0x2A:
             case 0x3A:
                 address = cpu.hl.reg16;
-                access_cycle = address == 0xFF44 ? ly_read_cycle : (address == 0xFF41 ? stat_read_cycle : 4);
+                access_cycle = 8;
                 break;
             case 0xF0:
                 address = static_cast<std::uint16_t>(0xFF00u + cpu_read(cpu, static_cast<std::uint16_t>(cpu.pc + 1)));
-                access_cycle = 8;
+                access_cycle = 12;
                 break;
             case 0xF2:
                 address = static_cast<std::uint16_t>(0xFF00u + cpu.bc.reg8.low);
@@ -168,7 +167,7 @@ namespace
                 break;
             case 0xFA:
                 address = cpu_read16(cpu, static_cast<std::uint16_t>(cpu.pc + 1));
-                access_cycle = 12;
+                access_cycle = 16;
                 break;
             case 0xCB:
             {
@@ -176,7 +175,7 @@ namespace
                 if ((cb_opcode & 0x07) == 6)
                 {
                     address = cpu.hl.reg16;
-                    access_cycle = 8;
+                    access_cycle = 12;
                 }
                 break;
             }
@@ -293,7 +292,7 @@ int main(int argc, char **argv)
     {
         const uint16_t pc_before = cpu.pc;
         const uint8_t opcode = cpu_read(cpu, pc_before);
-        const int ppu_access_cycle = std::max(ppu_write_cycle(cpu, opcode), ppu_read_cycle(cpu, ppu, opcode));
+        const int ppu_access_cycle = std::max(ppu_write_cycle(cpu, opcode), ppu_read_cycle(cpu, opcode));
         if (ppu_access_cycle != 0)
         {
             update_ppu(cpu, ppu, ppu_access_cycle);

@@ -14,14 +14,16 @@ struct PPU_LR35902
 
     std::array<std::uint32_t, PIXEL_COUNT> framebuffer{};
     int cycles_into_line = 0;
-    int mode3_duration = 172;
+    // Dot within the line at which mode 3 ends.
+    int mode3_end = 253;
+    // Line used for the LY=LYC comparison. -1 disables the comparison, which
+    // happens for a few dots after LY changes.
+    int ly_for_comparison = 0;
     std::uint8_t mode = 0;
     bool lcd_enabled = false;
     bool has_started = false;
     bool startup_mode0 = false;
-    bool startup_first_line = false;
-    bool startup_first_enable = false;
-    bool has_reenabled = false;
+    bool line_start_hold = false;
     bool framebuffer_initialized = false;
     bool stat_interrupt_line = false;
 };

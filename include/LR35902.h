@@ -65,6 +65,8 @@ struct CPU_LR35902
     uint8_t mbc5_ram_bank = 0;
     bool vram_locked = false;
     bool oam_locked = false;
+    bool vram_write_locked = false;
+    bool oam_write_locked = false;
     std::vector<uint8_t> cartridge_rom;
     std::vector<uint8_t> cartridge_ram;
     std::string serial_output;

@@ -426,12 +426,12 @@ void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
         return;
     }
 
-    if (address >= VRAM_START && address <= VRAM_END && cpu.vram_locked)
+    if (address >= VRAM_START && address <= VRAM_END && cpu.vram_write_locked)
     {
         return;
     }
 
-    if (address >= OAM_START && address <= OAM_END && cpu.oam_locked)
+    if (address >= OAM_START && address <= OAM_END && cpu.oam_write_locked)
     {
         return;
     }

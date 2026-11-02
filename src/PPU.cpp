@@ -20,6 +20,11 @@ namespace
     constexpr std::uint16_t BG_MAP_1 = 0x9C00;
     constexpr std::uint16_t OAM_START = 0xFE00;
 
+    // Dot within a line at which STAT reports mode 3. Lines are timed from the
+    // dot LY changes, so these include the four dots before mode 2 is reported.
+    constexpr int MODE3_START = 81;
+    constexpr int STARTUP_MODE3_START = 83;
+
     std::uint32_t shade_color(std::uint8_t shade)
     {
         switch (shade)
@@ -40,7 +45,7 @@ namespace
         ppu.mode = mode;
         std::uint8_t stat = cpu.memory[STAT];
         stat = static_cast<std::uint8_t>((stat & 0xF8) | (mode & 0x03));
-        if (cpu.memory[LY] == cpu.memory[LYC])
+        if (ppu.ly_for_comparison >= 0 && ppu.ly_for_comparison == cpu.memory[LYC])
         {
             stat |= 0x04;
         }
@@ -50,13 +55,26 @@ namespace
         }
         cpu.memory[STAT] = stat;
 
-        cpu.vram_locked = ppu.lcd_enabled && mode == 3;
-        cpu.oam_locked = ppu.lcd_enabled && (mode == 2 || mode == 3);
+        // Around the mode 2/3 boundary the CPU's read and write accesses are
+        // blocked at different dots: VRAM reads lock at dot 80, just before STAT
+        // reports mode 3, while OAM writes slip through until mode 3 starts and
+        // during the first four dots of each line.
+        const bool late_mode2 = mode == 2 && ppu.cycles_into_line >= 80;
+        cpu.vram_locked = ppu.lcd_enabled && (mode == 3 || late_mode2);
+        cpu.vram_write_locked = ppu.lcd_enabled && mode == 3;
+        cpu.oam_locked = ppu.lcd_enabled &&
+                         (mode == 2 || mode == 3 || ppu.line_start_hold);
+        cpu.oam_write_locked = ppu.lcd_enabled && ((mode == 2 && !late_mode2) || mode == 3);
 
+        // The mode 2 interrupt is raised as LY changes, before STAT reports
+        // mode 2, and the mode 0 interrupt one dot before STAT reports mode 0.
+        const bool mode0_line = mode == 0 ||
+                                (mode == 3 && ppu.cycles_into_line >= ppu.mode3_end - 1);
+        const bool mode2_line = mode == 2 || ppu.line_start_hold;
         const bool stat_line = ppu.lcd_enabled &&
-                               (((mode == 0) && (stat & 0x08) != 0) ||
+                               ((mode0_line && (stat & 0x08) != 0) ||
                                 ((mode == 1) && (stat & 0x10) != 0) ||
-                                ((mode == 2) && (stat & 0x20) != 0) ||
+                                (mode2_line && (stat & 0x20) != 0) ||
                                 ((stat & 0x44) == 0x44));
         if (stat_line && !ppu.stat_interrupt_line)
         {
@@ -136,15 +154,10 @@ namespace
                     continue;
                 }
 
-                if (sprite_x == 0)
-                {
-                    duration += 11;
-                    continue;
-                }
-
-                const int world_x = sprite_x - 8 + cpu.memory[SCX];
+                // Sprites at X=0 sit in the background tile left of the screen.
+                const std::uint8_t world_x = static_cast<std::uint8_t>(sprite_x - 8 + cpu.memory[SCX]);
                 const int alignment = world_x & 0x07;
-                const std::size_t tile = static_cast<std::size_t>((world_x / 8) & 0x1F);
+                const std::size_t tile = world_x / 8;
                 if (fetched_background_tiles[tile])
                 {
                     duration += 6;
@@ -298,6 +311,7 @@ namespace
         std::uint8_t ly = cpu.memory[LY];
         ly = ly == 153 ? 0 : static_cast<std::uint8_t>(ly + 1);
         cpu.memory[LY] = ly;
+        ppu.cycles_into_line = 0;
 
         if (ly == 144)
         {
@@ -306,14 +320,22 @@ namespace
             {
                 cpu.memory[0xFF0F] |= 0x02;
             }
+            ppu.line_start_hold = false;
+            ppu.ly_for_comparison = ly;
             update_status(cpu, ppu, 1);
         }
         else if (ly < 144)
         {
-            update_status(cpu, ppu, 2);
+            // The first four dots of a visible line keep the previous mode 0,
+            // while the LY=LYC comparison is disabled. Mode 2 starts at dot 4.
+            ppu.line_start_hold = true;
+            ppu.ly_for_comparison = ly == 0 ? 0 : -1;
+            update_status(cpu, ppu, 0);
         }
         else
         {
+            ppu.line_start_hold = false;
+            ppu.ly_for_comparison = ly;
             update_status(cpu, ppu, 1);
         }
     }
@@ -335,13 +357,15 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         }
         ppu.lcd_enabled = false;
         ppu.startup_mode0 = false;
-        ppu.startup_first_line = false;
-        ppu.startup_first_enable = false;
+        ppu.line_start_hold = false;
+        ppu.ly_for_comparison = 0;
         ppu.cycles_into_line = 0;
         ppu.mode = 0;
         cpu.memory[STAT] &= 0xFC; // Freeze LY=LYC while the LCD clock is stopped.
         cpu.vram_locked = false;
         cpu.oam_locked = false;
+        cpu.vram_write_locked = false;
+        cpu.oam_write_locked = false;
         return;
     }
 
@@ -350,17 +374,19 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         ppu.lcd_enabled = true;
         ppu.cycles_into_line = 0;
         cpu.memory[LY] = 0;
+        ppu.ly_for_comparison = 0;
+        ppu.line_start_hold = false;
         if (ppu.has_started)
         {
+            // Enabling the LCD starts a line that is still in mode 0 and skips
+            // the OAM search phase. Mode 3 on that line starts two dots late.
             ppu.startup_mode0 = true;
-            ppu.startup_first_line = true;
-            ppu.startup_first_enable = !ppu.has_reenabled;
-            ppu.has_reenabled = true;
             update_status(cpu, ppu, 0);
         }
         else
         {
             ppu.has_started = true;
+            ppu.startup_mode0 = false;
             update_status(cpu, ppu, 2);
         }
     }
@@ -374,19 +400,26 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         int mode_boundary;
         if (ppu.mode == 2)
         {
-            mode_boundary = 80;
-        }
-        else if (ppu.mode == 0 && ppu.startup_mode0)
-        {
-            mode_boundary = 84;
-        }
-        else if (ppu.mode == 0 && ppu.startup_first_line)
-        {
-            mode_boundary = 458;
+            mode_boundary = ppu.cycles_into_line < 80 ? 80 : MODE3_START;
         }
         else if (ppu.mode == 3)
         {
-            mode_boundary = 80 + ppu.mode3_duration;
+            mode_boundary = ppu.cycles_into_line < ppu.mode3_end - 1 ? ppu.mode3_end - 1 : ppu.mode3_end;
+        }
+        else if (ppu.mode == 0)
+        {
+            if (ppu.startup_mode0)
+            {
+                mode_boundary = STARTUP_MODE3_START;
+            }
+            else if (ppu.line_start_hold)
+            {
+                mode_boundary = 4;
+            }
+            else
+            {
+                mode_boundary = 456;
+            }
         }
         else
         {
@@ -402,16 +435,17 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
             continue;
         }
 
-        if (ppu.mode == 2)
+        if (ppu.mode == 2 && ppu.cycles_into_line < MODE3_START)
         {
-            ppu.mode3_duration = calculate_mode3_duration(cpu, cpu.memory[LY]);
+            update_status(cpu, ppu, 2);
+        }
+        else if (ppu.mode == 2)
+        {
+            ppu.mode3_end = MODE3_START + calculate_mode3_duration(cpu, cpu.memory[LY]);
             update_status(cpu, ppu, 3);
         }
-        else if (ppu.mode == 0 && ppu.startup_mode0)
+        else if (ppu.mode == 3 && ppu.cycles_into_line < ppu.mode3_end)
         {
-            ppu.startup_mode0 = false;
-            ppu.mode3_duration = calculate_mode3_duration(cpu, cpu.memory[LY]);
-            ppu.mode3_duration += 2;
             update_status(cpu, ppu, 3);
         }
         else if (ppu.mode == 3)
@@ -419,20 +453,28 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
             render_scanline(cpu, ppu);
             update_status(cpu, ppu, 0);
         }
+        else if (ppu.mode == 0)
+        {
+            if (ppu.startup_mode0)
+            {
+                ppu.startup_mode0 = false;
+                ppu.mode3_end = STARTUP_MODE3_START + calculate_mode3_duration(cpu, cpu.memory[LY]);
+                update_status(cpu, ppu, 3);
+            }
+            else if (ppu.line_start_hold)
+            {
+                ppu.line_start_hold = false;
+                ppu.ly_for_comparison = cpu.memory[LY];
+                update_status(cpu, ppu, 2);
+            }
+            else
+            {
+                advance_scanline(cpu, ppu);
+            }
+        }
         else
         {
-            ppu.cycles_into_line = 0;
-            if (ppu.startup_first_line)
-            {
-                ppu.startup_first_line = false;
-                ppu.startup_first_enable = false;
-            }
             advance_scanline(cpu, ppu);
         }
-    }
-
-    if (ppu.mode == 2 && ppu.cycles_into_line >= 76)
-    {
-        cpu.oam_locked = false;
     }
 }
