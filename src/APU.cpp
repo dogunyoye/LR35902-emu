@@ -9,7 +9,7 @@ namespace
     constexpr uint16_t NR10 = 0xFF10;
     constexpr uint16_t NR52 = 0xFF26;
     constexpr uint16_t WAVE_RAM_START = 0xFF30;
-    constexpr double CYCLES_PER_SAMPLE = 4194304.0 / APU_LR35902::SAMPLE_RATE;
+    constexpr double NOMINAL_CYCLES_PER_SAMPLE = 4194304.0 / APU_LR35902::SAMPLE_RATE;
     // Keeps at most a second of audio if nobody drains the samples.
     constexpr std::size_t MAX_BUFFERED_SAMPLES = APU_LR35902::SAMPLE_RATE * 2;
 
@@ -338,15 +338,15 @@ namespace
         apu.sample_accumulator_right += right * cycles;
         apu.sample_cycles += cycles;
         apu.sample_phase += cycles;
-        if (apu.sample_phase < CYCLES_PER_SAMPLE)
+        if (apu.sample_phase < apu.cycles_per_sample)
         {
             return;
         }
-        apu.sample_phase -= CYCLES_PER_SAMPLE;
+        apu.sample_phase -= apu.cycles_per_sample;
 
         // Average the interval, then remove DC like the hardware's output
         // capacitor does.
-        static const double charge_factor = std::pow(0.999958, CYCLES_PER_SAMPLE);
+        static const double charge_factor = std::pow(0.999958, NOMINAL_CYCLES_PER_SAMPLE);
         const double average_left = apu.sample_accumulator_left / apu.sample_cycles / 4.0;
         const double average_right = apu.sample_accumulator_right / apu.sample_cycles / 4.0;
         const double out_left = average_left - apu.highpass_left;

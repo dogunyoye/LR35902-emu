@@ -52,6 +52,9 @@ struct APU_LR35902
     // left/right samples since the emulator last drained them, plus
     // downsampling and DC-filter state.
     bool sample_output = false;
+    // T-cycles per output sample. The emulator adjusts this slightly to keep
+    // its audio queue level when the display and Game Boy frame rates differ.
+    double cycles_per_sample = 4194304.0 / SAMPLE_RATE;
     std::vector<int16_t> samples;
     double sample_accumulator_left = 0;
     double sample_accumulator_right = 0;

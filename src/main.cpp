@@ -3,6 +3,7 @@
 
 #include <SDL2/SDL.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -287,9 +288,20 @@ int main(int argc, char **argv)
     {
         std::cerr << "Audio unavailable: " << SDL_GetError() << std::endl;
     }
-    // Drop audio rather than queue more than this, so latency stays low when
-    // the display refresh runs slightly faster than the Game Boy.
-    constexpr Uint32 MAX_QUEUED_AUDIO_BYTES = APU_LR35902::SAMPLE_RATE / 10 * 2 * sizeof(int16_t);
+    // The display refresh rarely matches the Game Boy's 59.73 Hz, so the
+    // audio output rate is nudged by up to one percent to hold
+    // the queue near its target. Audio is only dropped if the queue runs far
+    // ahead, such as when the window was dragged or the display is very fast.
+    constexpr Uint32 AUDIO_FRAME_BYTES = 2 * sizeof(int16_t);
+    constexpr double TARGET_QUEUED_AUDIO_FRAMES = APU_LR35902::SAMPLE_RATE * 0.05;
+    constexpr Uint32 MAX_QUEUED_AUDIO_BYTES = APU_LR35902::SAMPLE_RATE / 4 * AUDIO_FRAME_BYTES;
+    constexpr double MAX_AUDIO_RATE_ADJUSTMENT = 0.01;
+    const double nominal_cycles_per_sample = cpu.apu.cycles_per_sample;
+
+    // Without vsync, frames are paced to the Game Boy's refresh rate.
+    const double seconds_per_frame = static_cast<double>(CYCLES_PER_FRAME) / 4194304.0;
+    const Uint64 performance_frequency = SDL_GetPerformanceFrequency();
+    Uint64 next_frame_time = SDL_GetPerformanceCounter();
 
     bool running = true;
     int cycle_accumulator = 0;
@@ -332,12 +344,19 @@ int main(int argc, char **argv)
 
         if (audio_device != 0)
         {
-            if (SDL_GetQueuedAudioSize(audio_device) < MAX_QUEUED_AUDIO_BYTES)
+            const Uint32 queued_bytes = SDL_GetQueuedAudioSize(audio_device);
+            if (queued_bytes < MAX_QUEUED_AUDIO_BYTES)
             {
                 SDL_QueueAudio(audio_device, cpu.apu.samples.data(),
                                static_cast<Uint32>(cpu.apu.samples.size() * sizeof(int16_t)));
             }
             cpu.apu.samples.clear();
+
+            // A fuller queue means fewer samples per emulated second, and vice versa.
+            const double queued_frames = static_cast<double>(SDL_GetQueuedAudioSize(audio_device)) / AUDIO_FRAME_BYTES;
+            const double fill_error = std::clamp(
+                (queued_frames - TARGET_QUEUED_AUDIO_FRAMES) / TARGET_QUEUED_AUDIO_FRAMES, -1.0, 1.0);
+            cpu.apu.cycles_per_sample = nominal_cycles_per_sample * (1.0 + MAX_AUDIO_RATE_ADJUSTMENT * fill_error);
         }
 
         SDL_UpdateTexture(texture, nullptr, ppu.framebuffer.data(), GB_WIDTH * sizeof(uint32_t));
@@ -347,7 +366,16 @@ int main(int argc, char **argv)
 
         if (!renderer_vsync)
         {
-            SDL_Delay(16);
+            next_frame_time += static_cast<Uint64>(seconds_per_frame * performance_frequency);
+            const Uint64 now = SDL_GetPerformanceCounter();
+            if (next_frame_time > now)
+            {
+                SDL_Delay(static_cast<Uint32>((next_frame_time - now) * 1000 / performance_frequency));
+            }
+            else
+            {
+                next_frame_time = now; // Running behind: don't try to catch up in a burst.
+            }
         }
     }
 
