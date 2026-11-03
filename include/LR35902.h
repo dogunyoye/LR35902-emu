@@ -90,7 +90,9 @@ struct CPU_LR35902
     std::vector<uint8_t> cartridge_ram;
     std::string serial_output;
 
-    // 64KB Flat Address Space (will be replaced later with custom read/write routers)
+    // Backing store for VRAM, WRAM, OAM, I/O registers, HRAM, and IE (and ROM when
+    // no cartridge is loaded). Access goes through cpu_read/cpu_write, which handle
+    // cartridge banking, echo RAM, register masks, and PPU/DMA lockouts.
     std::array<uint8_t, 65536> memory;
 };
 
