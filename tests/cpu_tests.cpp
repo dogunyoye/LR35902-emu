@@ -620,7 +620,7 @@ static void test_stop_consumes_padding_byte()
     assert(cpu.stopped);
 
     const uint16_t div_phase = cpu.div_cycle_accumulator;
-    assert(step_cpu(cpu) == 0);
+    assert(step_cpu(cpu) == 4); // Time passes, but the system clock is stopped
     assert(cpu.pc == 2);
     assert(cpu.div_cycle_accumulator == div_phase);
 

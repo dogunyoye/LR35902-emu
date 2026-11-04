@@ -71,5 +71,8 @@ uint8_t apu_read(const APU_LR35902 &apu, uint16_t address);
 void apu_write(APU_LR35902 &apu, uint16_t address, uint8_t value);
 // Advances the channel timers and sample output by T-cycles.
 void apu_tick(APU_LR35902 &apu, int cycles);
+// Produces output while the system clock is stopped by STOP: the channels hold
+// their levels, which the output filter decays to silence.
+void apu_tick_stopped(APU_LR35902 &apu, int cycles);
 // Clocks the frame sequencer; called when bit 4 of DIV falls.
 void apu_frame_sequencer_step(APU_LR35902 &apu);

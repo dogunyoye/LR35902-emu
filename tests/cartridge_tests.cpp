@@ -401,6 +401,23 @@ static void test_mbc3_rtc_persistence()
     std::filesystem::remove(save_path, filesystem_error);
 }
 
+static void test_mbc3_rtc_runs_during_stop()
+{
+    constexpr int CYCLES_PER_SECOND = 4194304;
+    std::string error;
+    CPU_LR35902 cpu{};
+    assert(load_cartridge(cpu, make_mbc3_rom(0x10, 0x03), error));
+    cpu_write(cpu, 0x0000, 0x0A);
+    write_rtc(cpu, 0x08, 0);
+
+    cpu.stopped = true;
+    for (int cycle = 0; cycle < CYCLES_PER_SECOND; cycle += step_cpu(cpu))
+    {
+    }
+    latch_rtc(cpu);
+    assert(read_latched_rtc(cpu, 0x08) == 1);
+}
+
 int main()
 {
     test_rom_only_cartridge();
@@ -412,6 +429,7 @@ int main()
     test_battery_ram_persistence();
     test_mbc3_banking();
     test_mbc3_rtc();
+    test_mbc3_rtc_runs_during_stop();
     test_mbc3_rtc_persistence();
     return 0;
 }

@@ -1569,7 +1569,10 @@ int step_cpu(CPU_LR35902 &cpu)
 
     if (cpu.stopped)
     {
-        return 0;
+        // The system clock is stopped; only the cartridge's RTC keeps time.
+        update_cartridge_rtc(cpu, 4);
+        apu_tick_stopped(cpu.apu, 4);
+        return 4;
     }
 
     if (cpu.halted)

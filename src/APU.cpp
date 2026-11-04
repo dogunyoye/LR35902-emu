@@ -596,6 +596,14 @@ void apu_tick(APU_LR35902 &apu, int cycles)
     }
 }
 
+void apu_tick_stopped(APU_LR35902 &apu, int cycles)
+{
+    if (apu.sample_output)
+    {
+        mix_cycles(apu, cycles);
+    }
+}
+
 void apu_frame_sequencer_step(APU_LR35902 &apu)
 {
     if (!apu.powered)
