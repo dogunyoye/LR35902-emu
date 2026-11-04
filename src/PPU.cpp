@@ -129,14 +129,14 @@ namespace
     }
 
     // Objects are fetched from left to right, ties in OAM order.
-    int next_object(const PPU_LR35902 &ppu)
+    int next_object(const std::array<PPU_LR35902::LineObject, 10> &objects, int count)
     {
         int next = -1;
-        for (int index = 0; index < ppu.line_object_count; ++index)
+        for (int index = 0; index < count; ++index)
         {
-            const PPU_LR35902::LineObject &object = ppu.line_objects[static_cast<std::size_t>(index)];
+            const PPU_LR35902::LineObject &object = objects[static_cast<std::size_t>(index)];
             if (!object.fetched && object.x < 168 &&
-                (next < 0 || object.x < ppu.line_objects[static_cast<std::size_t>(next)].x))
+                (next < 0 || object.x < objects[static_cast<std::size_t>(next)].x))
             {
                 next = index;
             }
@@ -154,11 +154,12 @@ namespace
 
         if ((cpu.memory[LCDC] & 0x02) != 0)
         {
-            PPU_LR35902 scan = ppu;
+            std::array<PPU_LR35902::LineObject, 10> objects = ppu.line_objects;
             std::array<bool, 32> penalised_tiles{};
-            for (int index = next_object(scan); index >= 0; index = next_object(scan))
+            for (int index = next_object(objects, ppu.line_object_count); index >= 0;
+                 index = next_object(objects, ppu.line_object_count))
             {
-                PPU_LR35902::LineObject &object = scan.line_objects[static_cast<std::size_t>(index)];
+                PPU_LR35902::LineObject &object = objects[static_cast<std::size_t>(index)];
                 object.fetched = true;
                 duration += object_penalty(cpu, penalised_tiles, object.x);
             }
@@ -370,7 +371,7 @@ namespace
 
         if (ppu.stall_dots == 0 && ppu.discard_pixels == 0 && ppu.background_count > 0 && (lcdc & 0x02) != 0)
         {
-            const int index = next_object(ppu);
+            const int index = next_object(ppu.line_objects, ppu.line_object_count);
             if (index >= 0 && ppu.line_objects[static_cast<std::size_t>(index)].x <= ppu.pixel_x + 8)
             {
                 ppu.stalled_object = index;
