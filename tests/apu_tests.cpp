@@ -81,6 +81,23 @@ static void test_sample_output()
     assert(nonzero);
 }
 
+static void test_sample_output_while_powered_off()
+{
+    APU_LR35902 apu{};
+    apu_power_on_after_boot(apu, false);
+    apu.sample_output = true;
+    apu_write(apu, 0xFF26, 0x00);
+    for (int cycle = 0; cycle < 4194304 / 10; cycle += 4)
+    {
+        apu_tick(apu, 4);
+    }
+    assert(apu.samples.size() >= 2 * (APU_LR35902::SAMPLE_RATE / 10 - 1));
+    for (const int16_t sample : apu.samples)
+    {
+        assert(sample == 0);
+    }
+}
+
 int main()
 {
     test_register_read_masks();
@@ -88,5 +105,6 @@ int main()
     test_dac_off_disables_channel();
     test_power_off_clears_registers();
     test_sample_output();
+    test_sample_output_while_powered_off();
     return 0;
 }

@@ -531,6 +531,11 @@ void apu_tick(APU_LR35902 &apu, int cycles)
 {
     if (!apu.powered)
     {
+        // Keep producing (silent) samples so the audio stream stays fed.
+        if (apu.sample_output)
+        {
+            mix_cycles(apu, cycles);
+        }
         return;
     }
 
