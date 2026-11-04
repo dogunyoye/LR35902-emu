@@ -87,13 +87,11 @@ namespace
         return shade_color(shade);
     }
 
-    // The window is drawn once LY has matched WY during the frame, while it is
-    // enabled and WX places it on screen.
+    // The window is fetched once LY has matched WY during the frame, while it
+    // is enabled and WX places it on screen. LCDC bit 0 only blanks its pixels.
     bool window_visible(const CPU_LR35902 &cpu, const PPU_LR35902 &ppu)
     {
-        const std::uint8_t lcdc = cpu.memory[LCDC];
-        return (lcdc & 0x01) != 0 && (lcdc & 0x20) != 0 && ppu.window_y_triggered &&
-               cpu.memory[WX] <= 166;
+        return (cpu.memory[LCDC] & 0x20) != 0 && ppu.window_y_triggered && cpu.memory[WX] <= 166;
     }
 
     // OAM scan: the first ten objects overlapping this line, in OAM order.

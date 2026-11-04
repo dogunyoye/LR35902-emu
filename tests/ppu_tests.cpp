@@ -240,6 +240,18 @@ static void test_variable_mode3_timing()
     update_ppu(window_cpu, window_ppu, 197);
     assert(window_cpu.memory[0xFF44] == 1);
 
+    // With LCDC bit 0 clear the window is blank but still fetched.
+    CPU_LR35902 blank_window_cpu{};
+    PPU_LR35902 blank_window_ppu{};
+    blank_window_cpu.memory[0xFF40] = 0xF0;
+    blank_window_cpu.memory[0xFF4A] = 0;
+    blank_window_cpu.memory[0xFF4B] = 7;
+    update_ppu(blank_window_cpu, blank_window_ppu, 81);
+    update_ppu(blank_window_cpu, blank_window_ppu, 172);
+    assert((blank_window_cpu.memory[0xFF41] & 0x03) == 3);
+    update_ppu(blank_window_cpu, blank_window_ppu, 6);
+    assert((blank_window_cpu.memory[0xFF41] & 0x03) == 0);
+
     CPU_LR35902 sprite_cpu{};
     PPU_LR35902 sprite_ppu{};
     sprite_cpu.memory[0xFF40] = 0x93;
