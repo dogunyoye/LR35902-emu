@@ -27,6 +27,14 @@ static void test_interrupt_flags_unused_bits()
     assert(cpu_read(cpu, 0xFF0F) == 0xE8);
 }
 
+static void test_ly_is_read_only()
+{
+    CPU_LR35902 cpu{};
+    cpu.memory[0xFF44] = 0x12;
+    cpu_write(cpu, 0xFF44, 0xC8);
+    assert(cpu.memory[0xFF44] == 0x12);
+}
+
 static void test_oam_dma_transfer_and_bus_lock()
 {
     CPU_LR35902 cpu{};
@@ -74,6 +82,7 @@ int main()
 {
     test_unusable_oam_region();
     test_interrupt_flags_unused_bits();
+    test_ly_is_read_only();
     test_oam_dma_transfer_and_bus_lock();
     test_oam_dma_fe_source_uses_echo_bus();
     return 0;

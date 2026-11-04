@@ -352,6 +352,11 @@ namespace
             return;
         }
 
+        if (address == 0xFF44)
+        {
+            return; // LY is read-only
+        }
+
         if (address == 0xFF04)
         {
             reset_divider(cpu);
