@@ -57,6 +57,19 @@ static void test_ppu_modes_scanlines_and_background()
     assert(!cpu.oam_locked);
 }
 
+static void test_lcd_off_resets_ly()
+{
+    CPU_LR35902 cpu{};
+    PPU_LR35902 ppu{};
+    cpu.memory[0xFF40] = 0x91;
+    update_ppu(cpu, ppu, 5 * 456 + 100);
+    assert(cpu.memory[0xFF44] == 5);
+
+    cpu.memory[0xFF40] = 0x11;
+    update_ppu(cpu, ppu, 4);
+    assert(cpu.memory[0xFF44] == 0);
+}
+
 static void test_ppu_window_composition()
 {
     CPU_LR35902 cpu{};
@@ -264,6 +277,7 @@ static void test_mid_line_palette_change()
 int main()
 {
     test_ppu_modes_scanlines_and_background();
+    test_lcd_off_resets_ly();
     test_ppu_window_composition();
     test_ppu_sprite_priority_palettes_flips_and_8x16();
     test_stat_mode_interrupt_edges();

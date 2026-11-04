@@ -468,6 +468,7 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         ppu.ly_for_comparison = 0;
         ppu.cycles_into_line = 0;
         ppu.mode = 0;
+        cpu.memory[LY] = 0;
         cpu.memory[STAT] &= 0xFC; // Freeze LY=LYC while the LCD clock is stopped.
         cpu.vram_locked = false;
         cpu.oam_locked = false;
