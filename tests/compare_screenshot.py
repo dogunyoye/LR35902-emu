@@ -22,7 +22,8 @@ def shades(path, palette):
 def main():
     shot = shades(sys.argv[1], EMULATOR_SHADES)
     reference = shades(sys.argv[2], REFERENCE_SHADES)
-    mismatches = [index for index, (a, b) in enumerate(zip(shot, reference)) if a != b]
+    # Colours outside either palette (-1) never match.
+    mismatches = [index for index, (a, b) in enumerate(zip(shot, reference)) if a != b or a < 0]
     if mismatches or len(shot) != len(reference):
         first = mismatches[0] if mismatches else 0
         print(f"{len(mismatches)} pixels differ; first at x={first % 160} y={first // 160}")
