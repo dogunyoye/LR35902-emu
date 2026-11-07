@@ -350,6 +350,31 @@ namespace
         }
 
         const std::uint8_t lcdc = cpu.memory[LCDC];
+
+        // Objects left of the screen (X < 8) are hit while the pixels left of
+        // the screen are shifted out, before the first tile is pushed. The
+        // fetcher holds that tile until they have been fetched.
+        if (ppu.stall_dots == 0 && ppu.pixel_x == 0 && ppu.background_count == 0 && ppu.fetch_step == 6 &&
+            (lcdc & 0x02) != 0)
+        {
+            const int index = next_object(ppu.line_objects, ppu.line_object_count);
+            if (index >= 0 && ppu.line_objects[static_cast<std::size_t>(index)].x < 8)
+            {
+                ppu.stalled_object = index;
+                ppu.stall_dots = object_penalty(cpu, ppu.penalised_tiles,
+                                                ppu.line_objects[static_cast<std::size_t>(index)].x);
+            }
+        }
+        if (ppu.stall_dots > 0 && ppu.background_count == 0)
+        {
+            if (--ppu.stall_dots == 0)
+            {
+                load_object(cpu, ppu, ppu.stalled_object);
+                ppu.stalled_object = -1;
+            }
+            return;
+        }
+
         advance_fetcher(cpu, ppu);
 
         if (!ppu.window_active && ppu.stall_dots == 0 && ppu.background_count > 0 && ppu.discard_pixels == 0 &&
