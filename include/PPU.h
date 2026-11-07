@@ -52,21 +52,28 @@ struct PPU_LR35902
     int pixel_x = 0;
     int discard_pixels = 0;
     // Pixels leave the pipeline two dots before their colour is resolved, so
-    // the last pixels are coloured just after STAT reports mode 0.
+    // the last pixels are coloured just after STAT reports mode 0. After
+    // objects left of the screen are fetched, the first pixel waits a dot
+    // longer and is coloured with the pixel behind it.
     struct PendingPixel
     {
         bool valid;
+        std::uint8_t delay;
         std::uint8_t x;
         std::uint8_t background_color;
         std::uint8_t object_color;
         std::uint8_t object_attributes;
     };
-    std::array<PendingPixel, 2> pending_pixels{};
+    std::array<PendingPixel, 3> pending_pixels{};
+    int pending_count = 0;
+    bool first_pixel_delayed = false;
     bool drawing = false;
     // On the DMG, the pixel output as BGP is written uses the old and new
     // values ORed together.
     bool bgp_write_pending = false;
     std::uint8_t bgp_write_blend = 0;
+    // LCDC as of the previous dot. Pixel colouring sees LCDC writes a dot late.
+    std::uint8_t resolve_lcdc = 0;
     int stall_dots = 0;
     int stalled_object = -1;
     bool window_active = false;

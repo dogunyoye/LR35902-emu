@@ -180,7 +180,8 @@ namespace
         ppu.window_active = false;
         ppu.window_drawn = false;
         ppu.penalised_tiles.fill(false);
-        ppu.pending_pixels = {};
+        ppu.pending_count = 0;
+        ppu.first_pixel_delayed = false;
         ppu.drawing = true;
         ppu.bgp_write_pending = false;
     }
@@ -299,7 +300,9 @@ namespace
             return {};
         }
 
-        const PPU_LR35902::PendingPixel pixel{true, static_cast<std::uint8_t>(ppu.pixel_x), background_color,
+        const std::uint8_t delay = ppu.first_pixel_delayed ? 3 : 2;
+        ppu.first_pixel_delayed = false;
+        const PPU_LR35902::PendingPixel pixel{true, delay, static_cast<std::uint8_t>(ppu.pixel_x), background_color,
                                               ppu.object_colors[0], ppu.object_attributes[0]};
         std::copy(ppu.object_colors.begin() + 1, ppu.object_colors.end(), ppu.object_colors.begin());
         std::copy(ppu.object_attributes.begin() + 1, ppu.object_attributes.end(), ppu.object_attributes.begin());
@@ -311,7 +314,7 @@ namespace
     // Palettes and the enable bits are read as each pixel is coloured.
     void resolve_pixel(const CPU_LR35902 &cpu, PPU_LR35902 &ppu, const PPU_LR35902::PendingPixel &pixel)
     {
-        const std::uint8_t lcdc = cpu.memory[LCDC];
+        const std::uint8_t lcdc = ppu.resolve_lcdc;
         const std::uint8_t visible_background = (lcdc & 0x01) != 0 ? pixel.background_color : 0;
         const std::uint8_t bgp = ppu.bgp_write_pending ? ppu.bgp_write_blend : cpu.memory[BGP];
         ppu.bgp_write_pending = false;
@@ -330,15 +333,23 @@ namespace
         {
             return;
         }
-        if (ppu.pending_pixels[1].valid)
+        int still_pending = 0;
+        for (int index = 0; index < ppu.pending_count; ++index)
         {
-            resolve_pixel(cpu, ppu, ppu.pending_pixels[1]);
+            PPU_LR35902::PendingPixel &pixel = ppu.pending_pixels[static_cast<std::size_t>(index)];
+            if (--pixel.delay == 0)
+            {
+                resolve_pixel(cpu, ppu, pixel);
+            }
+            else
+            {
+                ppu.pending_pixels[static_cast<std::size_t>(still_pending++)] = pixel;
+            }
         }
-        ppu.pending_pixels[1] = ppu.pending_pixels[0];
-        ppu.pending_pixels[0] = {};
+        ppu.pending_count = still_pending;
         if (ppu.pixel_x >= PPU_LR35902::WIDTH)
         {
-            if (!ppu.pending_pixels[1].valid)
+            if (ppu.pending_count == 0)
             {
                 ppu.drawing = false;
                 if (ppu.window_drawn)
@@ -371,6 +382,7 @@ namespace
             {
                 load_object(cpu, ppu, ppu.stalled_object);
                 ppu.stalled_object = -1;
+                ppu.first_pixel_delayed = true;
             }
             return;
         }
@@ -415,7 +427,11 @@ namespace
 
         if (ppu.background_count > 0)
         {
-            ppu.pending_pixels[0] = output_pixel(ppu);
+            const PPU_LR35902::PendingPixel pixel = output_pixel(ppu);
+            if (pixel.valid)
+            {
+                ppu.pending_pixels[static_cast<std::size_t>(ppu.pending_count++)] = pixel;
+            }
         }
     }
 
@@ -563,6 +579,7 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         for (int dot = 0; dot < step; ++dot)
         {
             advance_pixel_pipeline(cpu, ppu);
+            ppu.resolve_lcdc = cpu.memory[LCDC];
             ++ppu.cycles_into_line;
         }
         cycles -= step;
