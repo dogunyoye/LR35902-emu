@@ -66,7 +66,7 @@ struct PPU_LR35902
         std::uint8_t object_color;
         std::uint8_t object_attributes;
     };
-    std::array<PendingPixel, 3> pending_pixels{};
+    std::array<PendingPixel, 4> pending_pixels{};
     int pending_count = 0;
     bool first_pixel_delayed = false;
     bool drawing = false;
@@ -81,6 +81,8 @@ struct PPU_LR35902
     bool window_active = false;
     bool window_drawn = false;
     bool window_index_late = false;
+    // Pixel at which the window last started on this line.
+    int window_start_x = 0;
     std::array<bool, 32> penalised_tiles{};
     std::uint8_t mode = 0;
     bool lcd_enabled = false;

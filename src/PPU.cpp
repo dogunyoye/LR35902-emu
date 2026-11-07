@@ -386,6 +386,7 @@ namespace
 
         const std::uint8_t lcdc = cpu.memory[LCDC];
         const int pipeline_dot = ppu.pipeline_dot++;
+        const int fetch_step = ppu.fetch_step;
 
         // With WX below 7 the window starts left of the screen, before the
         // first background tile is pushed, so that its first 7 - WX pixels are
@@ -395,6 +396,7 @@ namespace
         {
             ppu.window_active = true;
             ppu.window_drawn = true;
+            ppu.window_start_x = ppu.pixel_x;
             ppu.fetch_window = true;
             ppu.fetch_first_tile = false;
             ppu.fetch_tile_x = 0;
@@ -445,12 +447,36 @@ namespace
             // the fetcher on the window's first tile, beginning this dot.
             ppu.window_active = true;
             ppu.window_drawn = true;
+            ppu.window_start_x = ppu.pixel_x;
             ppu.fetch_window = true;
             ppu.window_index_late = true;
             ppu.fetch_tile_x = 0;
             ppu.fetch_step = 1;
             ppu.background_count = 0;
             return;
+        }
+
+        // If WX matches the last pixel to leave the pipeline while the window
+        // is drawing, as a window tile fetch starts, the DMG inserts an extra
+        // colour 0 pixel there, pushing the background one pixel right.
+        if (ppu.window_active && ppu.fetch_window && fetch_step == 0 && ppu.stall_dots == 0 &&
+            ppu.pending_count > 0 && (lcdc & 0x20) != 0 && ppu.pixel_x + 6 == cpu.memory[WX] &&
+            ppu.pixel_x - 1 != ppu.window_start_x)
+        {
+            PPU_LR35902::PendingPixel &last = ppu.pending_pixels[static_cast<std::size_t>(ppu.pending_count - 1)];
+            PPU_LR35902::PendingPixel inserted = last;
+            inserted.background_color = 0;
+            // Object pixels stay where they are on screen.
+            ++last.x;
+            last.object_color = ppu.object_colors[0];
+            last.object_attributes = ppu.object_attributes[0];
+            std::copy(ppu.object_colors.begin() + 1, ppu.object_colors.end(), ppu.object_colors.begin());
+            std::copy(ppu.object_attributes.begin() + 1, ppu.object_attributes.end(), ppu.object_attributes.begin());
+            ppu.object_colors[7] = 0;
+            ppu.pending_pixels[static_cast<std::size_t>(ppu.pending_count)] = last;
+            last = inserted;
+            ++ppu.pending_count;
+            ++ppu.pixel_x;
         }
 
         if (ppu.stall_dots == 0 && ppu.discard_pixels == 0 && ppu.background_count > 0 && (lcdc & 0x02) != 0)
