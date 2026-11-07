@@ -244,13 +244,23 @@ namespace
         case 2:
             if (ppu.window_index_late)
             {
-                // The window's first tile index is read a dot later.
-                ppu.window_index_late = false;
+                // The window's first tile index and low bitplane are read a
+                // dot later.
                 fetch_tile_index(cpu, ppu, lcdc);
             }
             break;
         case 3:
-            ppu.fetch_low = cpu.memory[tile_row_address(cpu, ppu.fetch_tile_id, fetch_row(cpu, ppu))];
+            if (!ppu.window_index_late)
+            {
+                ppu.fetch_low = cpu.memory[tile_row_address(cpu, ppu.fetch_tile_id, fetch_row(cpu, ppu))];
+            }
+            break;
+        case 4:
+            if (ppu.window_index_late)
+            {
+                ppu.window_index_late = false;
+                ppu.fetch_low = cpu.memory[tile_row_address(cpu, ppu.fetch_tile_id, fetch_row(cpu, ppu))];
+            }
             break;
         case 5:
             ppu.fetch_high = cpu.memory[tile_row_address(cpu, ppu.fetch_tile_id, fetch_row(cpu, ppu)) + 1];
