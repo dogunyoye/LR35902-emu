@@ -317,7 +317,6 @@ namespace
         const std::uint8_t lcdc = ppu.resolve_lcdc;
         const std::uint8_t visible_background = (lcdc & 0x01) != 0 ? pixel.background_color : 0;
         const std::uint8_t bgp = ppu.bgp_write_pending ? ppu.bgp_write_blend : cpu.memory[BGP];
-        ppu.bgp_write_pending = false;
         std::uint32_t color = shade_color(static_cast<std::uint8_t>((bgp >> (visible_background * 2)) & 0x03));
         if (pixel.object_color != 0 && (lcdc & 0x02) != 0 &&
             ((pixel.object_attributes & 0x80) == 0 || visible_background == 0))
@@ -580,6 +579,7 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         {
             advance_pixel_pipeline(cpu, ppu);
             ppu.resolve_lcdc = cpu.memory[LCDC];
+            ppu.bgp_write_pending = false; // The blended BGP lasts only for the dot after the write.
             ++ppu.cycles_into_line;
         }
         cycles -= step;
