@@ -314,17 +314,6 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     return true;
 }
 
-bool load_rom_only_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error,
-                             GameBoyModel model)
-{
-    if (rom.size() != 0x8000 || rom[CARTRIDGE_TYPE_ADDRESS] != 0x00 || rom[ROM_SIZE_ADDRESS] != 0x00)
-    {
-        error = "ROM-only cartridges must be exactly 32 KiB with header type and size code 0x00.";
-        return false;
-    }
-    return load_cartridge(cpu, std::move(rom), error, model);
-}
-
 void update_cartridge_rtc(CPU_LR35902 &cpu, int cycles)
 {
     if (!cpu.cartridge_has_rtc || (cpu.rtc_registers[4] & 0x40) != 0)

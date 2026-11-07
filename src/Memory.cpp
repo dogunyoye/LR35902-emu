@@ -4,19 +4,14 @@
 // Important Game Boy Memory Ranges
 const uint16_t VRAM_START = 0x8000;
 const uint16_t VRAM_END = 0x9FFF;
-const uint16_t WRAM_START = 0xC000;
-const uint16_t WRAM_END = 0xDFFF;
 const uint16_t ECHO_START = 0xE000;
 const uint16_t ECHO_END = 0xFDFF;
 const uint16_t OAM_START = 0xFE00;
 const uint16_t OAM_END = 0xFE9F;
 const uint16_t OAM_UNUSABLE_START = 0xFEA0;
 const uint16_t OAM_UNUSABLE_END = 0xFEFF;
-const uint16_t IO_START = 0xFF00;
-const uint16_t IO_END = 0xFF7F;
 const uint16_t HRAM_START = 0xFF80;
 const uint16_t HRAM_END = 0xFFFE;
-const uint16_t IE_REG = 0xFFFF; // Interrupt Enable Register
 const uint16_t JOYP_REG = 0xFF00;
 const uint16_t SB_REG = 0xFF01;
 const uint16_t SC_REG = 0xFF02;

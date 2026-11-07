@@ -50,44 +50,6 @@ namespace
         reg8_ref(cpu, reg) = value;
     }
 
-    uint16_t read_reg16(CPU_LR35902 &cpu, uint8_t reg_pair)
-    {
-        switch (reg_pair)
-        {
-        case 0:
-            return cpu.bc.reg16;
-        case 1:
-            return cpu.de.reg16;
-        case 2:
-            return cpu.hl.reg16;
-        case 3:
-            return cpu.sp;
-        default:
-            throw std::runtime_error("Invalid 16-bit register index");
-        }
-    }
-
-    void write_reg16(CPU_LR35902 &cpu, uint8_t reg_pair, uint16_t value)
-    {
-        switch (reg_pair)
-        {
-        case 0:
-            cpu.bc.reg16 = value;
-            break;
-        case 1:
-            cpu.de.reg16 = value;
-            break;
-        case 2:
-            cpu.hl.reg16 = value;
-            break;
-        case 3:
-            cpu.sp = value;
-            break;
-        default:
-            throw std::runtime_error("Invalid 16-bit register index");
-        }
-    }
-
     void set_z_flag(CPU_LR35902 &cpu, bool value)
     {
         set_flag(cpu, FLAG_Z, value);
@@ -106,11 +68,6 @@ namespace
     void set_c_flag(CPU_LR35902 &cpu, bool value)
     {
         set_flag(cpu, FLAG_C, value);
-    }
-
-    uint8_t make_8bit_add_result(uint8_t a, uint8_t b, bool carry_in = false)
-    {
-        return static_cast<uint8_t>(a + b + static_cast<uint8_t>(carry_in));
     }
 
     uint8_t make_8bit_sub_result(uint8_t a, uint8_t b, bool carry_in = false)
@@ -932,12 +889,6 @@ int execute_instruction(CPU_LR35902 &cpu)
     {
         const uint8_t dest = (opcode >> 3) & 0x07;
         const uint8_t src = opcode & 0x07;
-        if (opcode == 0x76)
-        {
-            cpu.halted = true;
-            cycles = 4;
-            break;
-        }
         write_reg8(cpu, dest, read_reg8(cpu, src));
         cycles = (dest == 6 || src == 6) ? 8 : 4;
         break;

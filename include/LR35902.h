@@ -159,8 +159,6 @@ void update_cartridge_rtc(CPU_LR35902 &cpu, int cycles);
 void advance_cartridge_rtc_seconds(CPU_LR35902 &cpu, uint64_t seconds);
 uint8_t read_cartridge_rtc(const CPU_LR35902 &cpu);
 void write_cartridge_rtc(CPU_LR35902 &cpu, uint8_t value);
-bool load_rom_only_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error,
-                             GameBoyModel model = GameBoyModel::DmgABC);
 bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error,
                     GameBoyModel model = GameBoyModel::DmgABC);
 bool load_cartridge_ram(CPU_LR35902 &cpu, const std::filesystem::path &path, std::string &error);

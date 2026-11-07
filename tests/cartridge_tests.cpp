@@ -25,7 +25,7 @@ static void test_rom_only_cartridge()
     rom[0x0148] = 0x00; // 32 KiB
     std::string error;
 
-    assert(load_rom_only_cartridge(cpu, std::move(rom), error));
+    assert(load_cartridge(cpu, std::move(rom), error));
     assert(error.empty());
     assert(cpu.pc == 0x0100);
     assert(cpu.af.reg16 == 0x01B0);
@@ -41,13 +41,13 @@ static void test_rom_only_cartridge()
     assert(cpu_read(cpu, 0x0100) == 0x3E);
 
     std::vector<uint8_t> unsupported_type(0x8000, 0);
-    unsupported_type[0x0147] = 0x01;
-    assert(!load_rom_only_cartridge(cpu, std::move(unsupported_type), error));
+    unsupported_type[0x0147] = 0xFC; // Pocket Camera
+    assert(!load_cartridge(cpu, std::move(unsupported_type), error));
     assert(!error.empty());
     assert(cpu_read(cpu, 0x0100) == 0x3E);
 
     std::vector<uint8_t> wrong_size(0x4000, 0);
-    assert(!load_rom_only_cartridge(cpu, std::move(wrong_size), error));
+    assert(!load_cartridge(cpu, std::move(wrong_size), error));
     assert(!error.empty());
 }
 
