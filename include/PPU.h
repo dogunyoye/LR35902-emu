@@ -51,6 +51,8 @@ struct PPU_LR35902
     std::array<std::uint8_t, 8> object_attributes{};
     int pixel_x = 0;
     int discard_pixels = 0;
+    // Dots since the pixel pipeline started this line.
+    int pipeline_dot = 0;
     // Pixels leave the pipeline two dots before their colour is resolved, so
     // the last pixels are coloured just after STAT reports mode 0. After
     // objects left of the screen are fetched, the first pixel waits a dot
@@ -78,6 +80,7 @@ struct PPU_LR35902
     int stalled_object = -1;
     bool window_active = false;
     bool window_drawn = false;
+    bool window_index_late = false;
     std::array<bool, 32> penalised_tiles{};
     std::uint8_t mode = 0;
     bool lcd_enabled = false;

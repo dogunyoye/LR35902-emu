@@ -174,11 +174,13 @@ namespace
         ppu.background_count = 0;
         ppu.object_colors.fill(0);
         ppu.pixel_x = 0;
+        ppu.pipeline_dot = 0;
         ppu.discard_pixels = cpu.memory[SCX] & 0x07; // Only read as the line starts.
         ppu.stall_dots = 0;
         ppu.stalled_object = -1;
         ppu.window_active = false;
         ppu.window_drawn = false;
+        ppu.window_index_late = false;
         ppu.penalised_tiles.fill(false);
         ppu.pending_count = 0;
         ppu.first_pixel_delayed = false;
@@ -202,23 +204,46 @@ namespace
 
     // One dot of the background fetcher. Registers are read at the stage that
     // uses them, so mid-line writes affect the tiles fetched afterwards.
+    void fetch_tile_index(const CPU_LR35902 &cpu, PPU_LR35902 &ppu, std::uint8_t lcdc)
+    {
+        if (ppu.fetch_window && (lcdc & 0x20) == 0)
+        {
+            // Disabling the window takes effect at the next tile index fetch,
+            // which then fetches the background again.
+            ppu.fetch_window = false;
+            ppu.window_active = false;
+        }
+        if (ppu.fetch_window)
+        {
+            const std::uint16_t map = (lcdc & 0x40) != 0 ? BG_MAP_1 : BG_MAP_0;
+            ppu.fetch_tile_id = cpu.memory[map + ((ppu.window_line / 8) & 0x1F) * 32 + (ppu.fetch_tile_x & 0x1F)];
+        }
+        else
+        {
+            const std::uint16_t map = (lcdc & 0x08) != 0 ? BG_MAP_1 : BG_MAP_0;
+            const int column = ((cpu.memory[SCX] >> 3) + ppu.fetch_tile_x) & 0x1F;
+            const int row = ((cpu.memory[LY] + cpu.memory[SCY]) & 0xFF) / 8;
+            ppu.fetch_tile_id = cpu.memory[map + row * 32 + column];
+        }
+    }
+
     void advance_fetcher(const CPU_LR35902 &cpu, PPU_LR35902 &ppu)
     {
         const std::uint8_t lcdc = cpu.memory[LCDC];
         switch (ppu.fetch_step)
         {
         case 1:
-            if (ppu.fetch_window)
+            if (!ppu.window_index_late)
             {
-                const std::uint16_t map = (lcdc & 0x40) != 0 ? BG_MAP_1 : BG_MAP_0;
-                ppu.fetch_tile_id = cpu.memory[map + (ppu.window_line / 8) * 32 + (ppu.fetch_tile_x & 0x1F)];
+                fetch_tile_index(cpu, ppu, lcdc);
             }
-            else
+            break;
+        case 2:
+            if (ppu.window_index_late)
             {
-                const std::uint16_t map = (lcdc & 0x08) != 0 ? BG_MAP_1 : BG_MAP_0;
-                const int column = ((cpu.memory[SCX] >> 3) + ppu.fetch_tile_x) & 0x1F;
-                const int row = ((cpu.memory[LY] + cpu.memory[SCY]) & 0xFF) / 8;
-                ppu.fetch_tile_id = cpu.memory[map + row * 32 + column];
+                // The window's first tile index is read a dot later.
+                ppu.window_index_late = false;
+                fetch_tile_index(cpu, ppu, lcdc);
             }
             break;
         case 3:
@@ -360,6 +385,24 @@ namespace
         }
 
         const std::uint8_t lcdc = cpu.memory[LCDC];
+        const int pipeline_dot = ppu.pipeline_dot++;
+
+        // With WX below 7 the window starts left of the screen, before the
+        // first background tile is pushed, so that its first 7 - WX pixels are
+        // discarded by the time screen pixel 0 is reached.
+        if (!ppu.window_active && ppu.pixel_x == 0 && (lcdc & 0x20) != 0 && ppu.window_y_triggered &&
+            cpu.memory[WX] < 7 && pipeline_dot == 5 + cpu.memory[WX])
+        {
+            ppu.window_active = true;
+            ppu.window_drawn = true;
+            ppu.fetch_window = true;
+            ppu.fetch_first_tile = false;
+            ppu.fetch_tile_x = 0;
+            ppu.fetch_step = 1;
+            ppu.background_count = 0;
+            ppu.discard_pixels = 7 - cpu.memory[WX];
+            return;
+        }
 
         // Objects left of the screen (X < 8) are hit while the pixels left of
         // the screen are shifted out, before the first tile is pushed. The
@@ -390,13 +433,20 @@ namespace
 
         if (!ppu.window_active && ppu.stall_dots == 0 && ppu.background_count > 0 && ppu.discard_pixels == 0 &&
             (lcdc & 0x20) != 0 && ppu.window_y_triggered && cpu.memory[WX] <= 166 &&
-            ppu.pixel_x + 7 >= cpu.memory[WX])
+            ppu.pixel_x + 7 == cpu.memory[WX])
         {
+            // Each time the window starts again on a line, it moves on to the
+            // next window row.
+            if (ppu.window_drawn)
+            {
+                ++ppu.window_line;
+            }
             // Starting the window clears the background shifter and restarts
             // the fetcher on the window's first tile, beginning this dot.
             ppu.window_active = true;
             ppu.window_drawn = true;
             ppu.fetch_window = true;
+            ppu.window_index_late = true;
             ppu.fetch_tile_x = 0;
             ppu.fetch_step = 1;
             ppu.background_count = 0;
