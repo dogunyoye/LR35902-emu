@@ -167,10 +167,13 @@ namespace
 
     void start_pixel_pipeline(const CPU_LR35902 &cpu, PPU_LR35902 &ppu)
     {
-        ppu.fetch_step = 0;
+        // The first fetch of a line is a dot shorter, and the fetcher waits a
+        // dot before pushing the first tile.
+        ppu.fetch_step = 1;
         ppu.fetch_tile_x = 0;
         ppu.fetch_window = false;
         ppu.fetch_first_tile = true;
+        ppu.first_push_wait = false;
         ppu.background_count = 0;
         ppu.object_colors.fill(0);
         ppu.pixel_x = 0;
@@ -255,11 +258,17 @@ namespace
             {
                 // The first fetch of a line is thrown away and repeated.
                 ppu.fetch_first_tile = false;
+                ppu.first_push_wait = true;
                 ppu.fetch_step = 0;
                 return;
             }
             break;
         case 6:
+            if (ppu.first_push_wait)
+            {
+                ppu.first_push_wait = false;
+                return;
+            }
             if (ppu.background_count == 0)
             {
                 ppu.background_low = ppu.fetch_low;
@@ -399,6 +408,7 @@ namespace
             ppu.window_start_x = ppu.pixel_x;
             ppu.fetch_window = true;
             ppu.fetch_first_tile = false;
+            ppu.first_push_wait = false;
             ppu.fetch_tile_x = 0;
             ppu.fetch_step = 1;
             ppu.background_count = 0;
@@ -410,6 +420,7 @@ namespace
         // the screen are shifted out, before the first tile is pushed. The
         // fetcher holds that tile until they have been fetched.
         if (ppu.stall_dots == 0 && ppu.pixel_x == 0 && ppu.background_count == 0 && ppu.fetch_step == 6 &&
+            !ppu.first_push_wait &&
             (lcdc & 0x02) != 0)
         {
             const int index = next_object(ppu.line_objects, ppu.line_object_count);

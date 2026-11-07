@@ -40,6 +40,7 @@ struct PPU_LR35902
     int fetch_tile_x = 0;
     bool fetch_window = false;
     bool fetch_first_tile = false;
+    bool first_push_wait = false;
     std::uint8_t fetch_tile_id = 0;
     std::uint8_t fetch_low = 0;
     std::uint8_t fetch_high = 0;
