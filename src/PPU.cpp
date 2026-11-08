@@ -144,17 +144,16 @@ namespace
 
     void start_pixel_pipeline(const CPU_LR35902 &cpu, PPU_State &ppu)
     {
-        // The first fetch of a line is a dot shorter, and the fetcher waits a
-        // dot before pushing the first tile.
-        ppu.fetch_step = 1;
+        // The first fetch is shorter, its tile index read lost as the line
+        // starts. Its pixels are shifted out left of the screen.
+        ppu.fetch_step = 2;
         ppu.fetch_tile_x = 0;
         ppu.fetch_window = false;
         ppu.fetch_first_tile = true;
-        ppu.first_push_wait = false;
         ppu.background_count = 0;
         ppu.object_colors.fill(0);
         ppu.pixel_x = 0;
-        ppu.pipeline_dot = 0;
+        ppu.invisible_pixels = 8;
         ppu.discard_pixels = cpu.memory[SCX] & 0x07; // Only read as the line starts.
         ppu.stall_dots = 0;
         ppu.stalled_object = -1;
@@ -241,27 +240,21 @@ namespace
             break;
         case 5:
             ppu.fetch_high = cpu.memory[tile_row_address(cpu, ppu.fetch_tile_id, fetch_row(cpu, ppu)) + 1];
-            if (ppu.fetch_first_tile)
-            {
-                // The first fetch of a line is thrown away and repeated.
-                ppu.fetch_first_tile = false;
-                ppu.first_push_wait = true;
-                ppu.fetch_step = 0;
-                return;
-            }
             break;
         case 6:
-            if (ppu.first_push_wait)
-            {
-                ppu.first_push_wait = false;
-                return;
-            }
             if (ppu.background_count == 0)
             {
                 ppu.background_low = ppu.fetch_low;
                 ppu.background_high = ppu.fetch_high;
                 ppu.background_count = 8;
-                ++ppu.fetch_tile_x;
+                if (ppu.fetch_first_tile)
+                {
+                    ppu.fetch_first_tile = false; // The same tile is fetched again for the screen.
+                }
+                else
+                {
+                    ++ppu.fetch_tile_x;
+                }
                 ppu.fetch_step = 0;
             }
             return;
@@ -315,6 +308,11 @@ namespace
         ppu.background_low = static_cast<std::uint8_t>(ppu.background_low << 1);
         ppu.background_high = static_cast<std::uint8_t>(ppu.background_high << 1);
         --ppu.background_count;
+        if (ppu.invisible_pixels > 0)
+        {
+            --ppu.invisible_pixels;
+            return {};
+        }
         if (ppu.discard_pixels > 0)
         {
             --ppu.discard_pixels;
@@ -387,59 +385,18 @@ namespace
         }
 
         const std::uint8_t lcdc = cpu.memory[LCDC];
-        const int pipeline_dot = ppu.pipeline_dot++;
         const int fetch_step = ppu.fetch_step;
-
-        // With WX below 7 the window starts left of the screen, before the
-        // first background tile is pushed, so that its first 7 - WX pixels are
-        // discarded by the time screen pixel 0 is reached.
-        if (!ppu.window_active && ppu.pixel_x == 0 && (lcdc & 0x20) != 0 && ppu.window_y_triggered &&
-            cpu.memory[WX] < 7 && pipeline_dot == 5 + cpu.memory[WX])
-        {
-            ppu.window_active = true;
-            ppu.window_drawn = true;
-            ppu.window_start_x = ppu.pixel_x;
-            ppu.fetch_window = true;
-            ppu.fetch_first_tile = false;
-            ppu.first_push_wait = false;
-            ppu.fetch_tile_x = 0;
-            ppu.fetch_step = 1;
-            ppu.background_count = 0;
-            ppu.discard_pixels = 7 - cpu.memory[WX];
-            return;
-        }
-
-        // Objects left of the screen (X < 8) are hit while the pixels left of
-        // the screen are shifted out, before the first tile is pushed. The
-        // fetcher holds that tile until they have been fetched.
-        if (ppu.stall_dots == 0 && ppu.pixel_x == 0 && ppu.background_count == 0 && ppu.fetch_step == 6 &&
-            !ppu.first_push_wait &&
-            (lcdc & 0x02) != 0)
-        {
-            const int index = next_object(ppu.line_objects, ppu.line_object_count);
-            if (index >= 0 && ppu.line_objects[static_cast<std::size_t>(index)].x < 8)
-            {
-                ppu.stalled_object = index;
-                ppu.stall_dots = object_penalty(cpu, ppu.penalised_tiles,
-                                                ppu.line_objects[static_cast<std::size_t>(index)].x);
-            }
-        }
-        if (ppu.stall_dots > 0 && ppu.background_count == 0)
-        {
-            if (--ppu.stall_dots == 0)
-            {
-                load_object(cpu, ppu, ppu.stalled_object);
-                ppu.stalled_object = -1;
-                ppu.first_pixel_delayed = true;
-            }
-            return;
-        }
+        // Position of the next pixel to leave, counting the 8 left of the screen.
+        const int position = ppu.invisible_pixels > 0 ? 8 - ppu.invisible_pixels : ppu.pixel_x + 8;
+        const bool scrolling_done = ppu.invisible_pixels > 0 || ppu.discard_pixels == 0;
 
         advance_fetcher(cpu, ppu);
 
-        if (!ppu.window_active && ppu.stall_dots == 0 && ppu.background_count > 0 && ppu.discard_pixels == 0 &&
+        // The window starts when WX matches. With WX below 7 that is left of
+        // the screen, and its pixels there are shifted out unseen.
+        if (!ppu.window_active && ppu.stall_dots == 0 && ppu.background_count > 0 && scrolling_done &&
             (lcdc & 0x20) != 0 && ppu.window_y_triggered && cpu.memory[WX] <= 166 &&
-            ppu.pixel_x + 7 == cpu.memory[WX])
+            position == cpu.memory[WX] + 1)
         {
             // Each time the window starts again on a line, it moves on to the
             // next window row.
@@ -454,6 +411,7 @@ namespace
             ppu.window_start_x = ppu.pixel_x;
             ppu.fetch_window = true;
             ppu.window_index_late = true;
+            ppu.fetch_first_tile = false;
             ppu.fetch_tile_x = 0;
             ppu.fetch_step = 1;
             ppu.background_count = 0;
@@ -483,10 +441,10 @@ namespace
             ++ppu.pixel_x;
         }
 
-        if (ppu.stall_dots == 0 && ppu.discard_pixels == 0 && ppu.background_count > 0 && (lcdc & 0x02) != 0)
+        if (ppu.stall_dots == 0 && scrolling_done && ppu.background_count > 0 && (lcdc & 0x02) != 0)
         {
             const int index = next_object(ppu.line_objects, ppu.line_object_count);
-            if (index >= 0 && ppu.line_objects[static_cast<std::size_t>(index)].x <= ppu.pixel_x + 8)
+            if (index >= 0 && ppu.line_objects[static_cast<std::size_t>(index)].x <= position)
             {
                 ppu.stalled_object = index;
                 ppu.stall_dots = object_penalty(cpu, ppu.penalised_tiles,
@@ -500,6 +458,7 @@ namespace
             {
                 load_object(cpu, ppu, ppu.stalled_object);
                 ppu.stalled_object = -1;
+                ppu.first_pixel_delayed = ppu.first_pixel_delayed || ppu.invisible_pixels > 0;
             }
             return;
         }

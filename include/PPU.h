@@ -40,8 +40,9 @@ struct PPU_State
     int fetch_step = 0;
     int fetch_tile_x = 0;
     bool fetch_window = false;
+    // The first tile fetched on a line is shifted out left of the screen and
+    // then fetched again.
     bool fetch_first_tile = false;
-    bool first_push_wait = false;
     std::uint8_t fetch_tile_id = 0;
     std::uint8_t fetch_low = 0;
     std::uint8_t fetch_high = 0;
@@ -52,13 +53,15 @@ struct PPU_State
     std::array<std::uint8_t, 8> object_colors{};
     std::array<std::uint8_t, 8> object_attributes{};
     int pixel_x = 0;
+    // Pixels still to be shifted out left of the screen. Objects and the
+    // window are matched against a position that counts these 8 pixels.
+    int invisible_pixels = 0;
+    // Pixels discarded at the start of the line for SCX's low bits.
     int discard_pixels = 0;
-    // Dots since the pixel pipeline started this line.
-    int pipeline_dot = 0;
     // Pixels leave the pipeline two dots before their colour is resolved, so
-    // the last pixels are coloured just after STAT reports mode 0. After
-    // objects left of the screen are fetched, the first pixel waits a dot
-    // longer and is coloured with the pixel behind it.
+    // the last pixels are coloured just after STAT reports mode 0. After an
+    // object left of the screen is fetched, the first pixel on screen waits a
+    // dot longer and is coloured with the pixel behind it.
     struct PendingPixel
     {
         bool valid;
