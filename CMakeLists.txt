@@ -6,12 +6,18 @@ project(LR35902-emu
     LANGUAGES CXX
 )
 
+# Default to an optimised build; the emulator needs it to run at full speed.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release RelWithDebInfo MinSizeRel)
+endif()
+
 # Global compile options: warnings + best-effort ASAN/UBSAN in Debug builds
 add_library(lr35902_warnings INTERFACE)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(lr35902_warnings INTERFACE
         -Wall -Wextra -Wpedantic
-        $<$<CONFIG:Debug>:-fno-omit-frame-pointer>
+        $<$<CONFIG:Debug>:-fno-omit-frame-pointer -fsanitize=address,undefined>
     )
     target_link_options(lr35902_warnings INTERFACE
         $<$<CONFIG:Debug>:-fsanitize=address,undefined>
@@ -55,5 +61,5 @@ find_package(SDL2 REQUIRED)
 # Placeholder executable target — add main.cpp under src/ to enable.
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
     add_executable(lr35902-emu src/main.cpp)
-    target_link_libraries(lr35902-emu PRIVATE lr35902 SDL2::SDL2)
+    target_link_libraries(lr35902-emu PRIVATE lr35902 lr35902_warnings SDL2::SDL2)
 endif()

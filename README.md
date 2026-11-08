@@ -37,6 +37,8 @@ cmake -B build
 cmake --build build
 ```
 
+Builds are optimised (`Release`) unless another build type is given.
+
 This generates:
 
 - the static library: `build/liblr35902.a`
@@ -74,7 +76,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ```
 
-This enables sanitizer instrumentation useful for emulator debugging.
+This enables AddressSanitizer and UndefinedBehaviorSanitizer instrumentation useful for emulator debugging. Debug builds run much slower, so use the default build for playing games.
 
 ## Usage
 
