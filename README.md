@@ -23,7 +23,7 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | Per-dot pixel FIFO rendering (mid-line register changes), variable mode-3 timing, VBlank and STAT interrupts | :white_check_mark: done |
 | Sound: two square channels (one with sweep), wave and noise channels, stereo mixing to SDL audio | :white_check_mark: done |
 | Regression tests for CPU, timer, serial, interrupts, joypad, cartridge, memory, and PPU behavior | :white_check_mark: done |
-| CLI runner with cycle-driven cartridge support and keyboard controls | :white_check_mark: done |
+| CLI runner with cycle-driven cartridge support, configurable keyboard controls, and controller support | :white_check_mark: done |
 | Save states and fast-forward | :white_check_mark: done |
 | DMG OAM corruption bug | :white_check_mark: done |
 | Sub-M-cycle peripheral conformance (DMA bus conflicts) | :soon: planned |
@@ -44,7 +44,7 @@ Builds are optimised (`Release`) unless another build type is given.
 This generates:
 
 - the static library: `build/liblr35902.a`
-- test executables: `build/cpu_tests`, `build/timer_tests`, `build/cartridge_tests`, `build/memory_tests`, `build/joypad_tests`, `build/serial_tests`, `build/ppu_tests`, `build/apu_tests`, and `build/save_state_tests`
+- test executables: `build/cpu_tests`, `build/timer_tests`, `build/cartridge_tests`, `build/memory_tests`, `build/joypad_tests`, `build/serial_tests`, `build/ppu_tests`, `build/apu_tests`, `build/save_state_tests`, and `build/controls_tests`
 - the emulator CLI: `build/lr35902-emu`
 - the serial ROM test runner: `build/rom_test_runner`
 
@@ -96,7 +96,35 @@ Run a supported ROM-only (32 KiB), MBC1, MBC2, MBC3, MBC5, MBC7, or HuC1 cartrid
 
 Battery-backed cartridge RAM is loaded from and saved to a same-basename `.sav` file beside the ROM. MBC3 saves also store the real-time clock in the format BGB and VBA-M use, and the clock catches up on time that passed while the emulator was closed.
 
-Controls: arrow keys move, Z is A, X is B, Right Shift is Select, and Enter is Start. Hold Tab to fast-forward at four times normal speed (sound is muted meanwhile). On MBC7 cartridges, which have a tilt sensor, I and K tilt up and down and J and L tilt left and right.
+### Controls
+
+| Action | Key | Controller |
+|---|---|---|
+| D-pad | Arrow keys | D-pad or left stick |
+| A / B | Z / X | A / B |
+| Select / Start | Right Shift / Enter | Back / Start |
+| Fast-forward (hold; four times speed, sound muted) | Tab | Right trigger |
+| Pause | P | |
+| Save state / load state | F5 / F8 | |
+| Fullscreen | F11 | |
+| Tilt (MBC7 cartridges) | I, K, J, L | Right stick |
+| Quit | Escape | |
+
+Controllers are picked up when connected. Keys can be rebound in a `controls.cfg` file in the emulator's settings folder (`~/.local/share/lr35902-emu/` on Linux, `%APPDATA%\lr35902-emu\` on Windows, `~/Library/Application Support/lr35902-emu/` on macOS), or in a file given with `--controls FILE`. Each line binds an action to one or more keys by their SDL names; actions not listed keep their default keys:
+
+```text
+# controls.cfg
+a = Space
+b = Left Ctrl
+start = Return, Keypad Enter
+fast_forward = Backspace
+```
+
+The actions are `up`, `down`, `left`, `right`, `a`, `b`, `select`, `start`, `tilt_up`, `tilt_down`, `tilt_left`, `tilt_right`, `fast_forward`, `pause`, `save_state`, `load_state`, `fullscreen`, and `quit`. The emulator stops with a message if the file has a mistake or binds one key to two actions.
+
+The window can be resized and scales the picture by whole numbers. `--scale N` sets its starting size (1–10 times the Game Boy's 160×144, default 4) and `--fullscreen` starts in fullscreen.
+
+### Save states
 
 F5 saves the whole machine state to a same-basename `.state` file beside the ROM, and F8 loads it back. A state only loads into the same build of the emulator running the same ROM. Loading a state also restores the cartridge RAM it was saved with, which is then written to the `.sav` file on exit as usual.
 
@@ -116,7 +144,8 @@ Show usage/help:
 │   ├── LR35902.h        # CPU state model, flags, public API
 │   ├── PPU.h            # PPU state and pixel pipeline
 │   ├── APU.h            # Sound channel state and sample output
-│   └── SaveState.h      # Save state serialisation
+│   ├── SaveState.h      # Save state serialisation
+│   └── Controls.h       # Player actions and their bindings
 ├── src/
 │   ├── LR35902.cpp      # Instruction decoder, flags, interrupt stepping
 │   ├── Memory.cpp       # Memory routing and access rules
@@ -124,6 +153,7 @@ Show usage/help:
 │   ├── PPU.cpp          # LCD modes, scanlines, and the per-dot pixel FIFO
 │   ├── APU.cpp          # Sound channels, frame sequencer, and mixing
 │   ├── SaveState.cpp    # Save state format, loading, and saving
+│   ├── Controls.cpp     # Key bindings, controls file, and controller layout
 │   ├── Serial.cpp       # Internal-clock serial transfers and test output
 │   ├── Timer.cpp        # Divider/timer register updates
 │   └── main.cpp         # CLI entry point and demo runner
@@ -137,6 +167,7 @@ Show usage/help:
 │   ├── ppu_tests.cpp        # PPU modes, scanlines, window, and sprites
 │   ├── apu_tests.cpp        # Sound registers, length counters, and output
 │   ├── save_state_tests.cpp # Save state round trips and rejected states
+│   ├── controls_tests.cpp   # Key binding defaults and controls file parsing
 │   ├── rom_test_runner.cpp  # ROM conformance runner (serial, signatures, screenshots)
 │   ├── run_rom_suites.sh    # Runs the Mooneye, blargg, dmg-acid2, and Mealybug suites
 │   └── compare_screenshot.py # Compares screenshots with DMG reference images

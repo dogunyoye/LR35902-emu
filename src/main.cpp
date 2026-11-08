@@ -1,15 +1,18 @@
 #include "LR35902.h"
 #include "PPU.h"
 #include "SaveState.h"
+#include "Controls.h"
 
 #include <SDL2/SDL.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -18,21 +21,28 @@ namespace
 {
     constexpr int GB_WIDTH = PPU_LR35902::WIDTH;
     constexpr int GB_HEIGHT = PPU_LR35902::HEIGHT;
-    constexpr int SCALE = 4;
+    constexpr int DEFAULT_SCALE = 4;
     constexpr int CYCLES_PER_FRAME = 70224;
     // Frames run per displayed frame while fast-forwarding.
     constexpr int FAST_FORWARD_FRAMES = 4;
 
     void print_usage(const char *program_name)
     {
-        std::cout << "Usage: " << program_name << " [ROM_PATH]\n"
+        std::cout << "Usage: " << program_name << " [OPTIONS] [ROM_PATH]\n"
                   << "\n"
                   << "Run the LR35902 emulator with either a Game Boy ROM or the built-in demo program.\n"
+                  << "\n"
+                  << "Options:\n"
+                  << "  --scale N        Start with the window N times the Game Boy's size (1-10, default 4)\n"
+                  << "  --fullscreen     Start in fullscreen\n"
+                  << "  --controls FILE  Read key bindings from FILE instead of controls.cfg in the\n"
+                  << "                   emulator's settings folder\n"
+                  << "  -h, --help       Show this help\n"
                   << "\n"
                   << "Examples:\n"
                   << "  " << program_name << "\n"
                   << "  " << program_name << " /path/to/game.gb\n"
-                  << "  " << program_name << " --help\n";
+                  << "  " << program_name << " --scale 3 /path/to/game.gb\n";
     }
 
     void initialize_demo_vram(CPU_LR35902 &cpu)
@@ -126,64 +136,185 @@ namespace
         return load_cartridge(cpu, std::move(rom), error);
     }
 
-    void update_joypad_from_key(CPU_LR35902 &cpu, SDL_Keycode key, bool pressed)
+    // Reads key bindings from the given controls file, or from controls.cfg in
+    // the emulator's settings folder if none was given and one exists there.
+    bool load_key_bindings(const std::filesystem::path &given_path, KeyBindings &bindings)
     {
-        switch (key)
+        std::filesystem::path path = given_path;
+        if (path.empty())
         {
-        case SDLK_RIGHT:
-            cpu_set_joypad_button(cpu, JoypadButton::Right, pressed);
+            char *settings = SDL_GetPrefPath("", "lr35902-emu");
+            if (settings == nullptr)
+            {
+                return true;
+            }
+            path = std::filesystem::path(settings) / "controls.cfg";
+            SDL_free(settings);
+            if (!std::filesystem::exists(path))
+            {
+                return true;
+            }
+        }
+
+        std::ifstream file(path);
+        if (!file)
+        {
+            std::cerr << "Unable to read controls file " << path.string() << std::endl;
+            return false;
+        }
+        const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        std::string error;
+        if (!parse_key_bindings(text, bindings, error))
+        {
+            std::cerr << "Unable to use controls file " << path.string() << ": " << error << std::endl;
+            return false;
+        }
+        std::cout << "Using controls from " << path.string() << "\n";
+        return true;
+    }
+
+    std::optional<JoypadButton> joypad_button_for(Action action)
+    {
+        switch (action)
+        {
+        case Action::Up:
+            return JoypadButton::Up;
+        case Action::Down:
+            return JoypadButton::Down;
+        case Action::Left:
+            return JoypadButton::Left;
+        case Action::Right:
+            return JoypadButton::Right;
+        case Action::A:
+            return JoypadButton::A;
+        case Action::B:
+            return JoypadButton::B;
+        case Action::Select:
+            return JoypadButton::Select;
+        case Action::Start:
+            return JoypadButton::Start;
+        default:
+            return std::nullopt;
+        }
+    }
+
+    // Actions held on the keyboard, controller buttons, and controller sticks
+    // and triggers. An action is held while any of them holds it.
+    struct HeldActions
+    {
+        std::array<bool, ACTION_COUNT> keyboard{};
+        std::array<bool, ACTION_COUNT> buttons{};
+        std::array<bool, ACTION_COUNT> axes{};
+        std::array<bool, ACTION_COUNT> applied{};
+
+        bool held(Action action) const
+        {
+            const std::size_t index = static_cast<std::size_t>(action);
+            return keyboard[index] || buttons[index] || axes[index];
+        }
+    };
+
+    // Passes changes in the held Game Boy buttons to the emulated joypad, and
+    // sets the tilt read by MBC7 cartridges.
+    void apply_held_actions(CPU_LR35902 &cpu, HeldActions &held)
+    {
+        for (std::size_t index = 0; index < ACTION_COUNT; ++index)
+        {
+            const Action action = static_cast<Action>(index);
+            const std::optional<JoypadButton> button = joypad_button_for(action);
+            const bool now_held = held.held(action);
+            if (button && now_held != held.applied[index])
+            {
+                cpu_set_joypad_button(cpu, *button, now_held);
+            }
+            held.applied[index] = now_held;
+        }
+        cpu.mbc7_tilt_x = (held.held(Action::TiltRight) ? 1 : 0) - (held.held(Action::TiltLeft) ? 1 : 0);
+        cpu.mbc7_tilt_y = (held.held(Action::TiltDown) ? 1 : 0) - (held.held(Action::TiltUp) ? 1 : 0);
+    }
+
+    // Sticks act as directions once pushed halfway; the left stick moves and the
+    // right stick tilts. The right trigger fast-forwards.
+    void update_held_axis(HeldActions &held, SDL_GameControllerAxis axis, Sint16 value)
+    {
+        constexpr Sint16 THRESHOLD = 16384;
+        const auto set = [&held](Action action, bool on) { held.axes[static_cast<std::size_t>(action)] = on; };
+        switch (axis)
+        {
+        case SDL_CONTROLLER_AXIS_LEFTX:
+            set(Action::Left, value < -THRESHOLD);
+            set(Action::Right, value > THRESHOLD);
             break;
-        case SDLK_LEFT:
-            cpu_set_joypad_button(cpu, JoypadButton::Left, pressed);
+        case SDL_CONTROLLER_AXIS_LEFTY:
+            set(Action::Up, value < -THRESHOLD);
+            set(Action::Down, value > THRESHOLD);
             break;
-        case SDLK_UP:
-            cpu_set_joypad_button(cpu, JoypadButton::Up, pressed);
+        case SDL_CONTROLLER_AXIS_RIGHTX:
+            set(Action::TiltLeft, value < -THRESHOLD);
+            set(Action::TiltRight, value > THRESHOLD);
             break;
-        case SDLK_DOWN:
-            cpu_set_joypad_button(cpu, JoypadButton::Down, pressed);
+        case SDL_CONTROLLER_AXIS_RIGHTY:
+            set(Action::TiltUp, value < -THRESHOLD);
+            set(Action::TiltDown, value > THRESHOLD);
             break;
-        case SDLK_z:
-            cpu_set_joypad_button(cpu, JoypadButton::A, pressed);
-            break;
-        case SDLK_x:
-            cpu_set_joypad_button(cpu, JoypadButton::B, pressed);
-            break;
-        case SDLK_RSHIFT:
-            cpu_set_joypad_button(cpu, JoypadButton::Select, pressed);
-            break;
-        case SDLK_RETURN:
-            cpu_set_joypad_button(cpu, JoypadButton::Start, pressed);
+        case SDL_CONTROLLER_AXIS_TRIGGERRIGHT:
+            set(Action::FastForward, value > THRESHOLD);
             break;
         default:
             break;
         }
     }
-
-    // MBC7 cartridges read tilt from an accelerometer: I/K tilt up and down,
-    // J/L left and right.
-    void update_tilt_from_keys(CPU_LR35902 &cpu)
-    {
-        const Uint8 *keys = SDL_GetKeyboardState(nullptr);
-        cpu.mbc7_tilt_x = (keys[SDL_SCANCODE_L] ? 1 : 0) - (keys[SDL_SCANCODE_J] ? 1 : 0);
-        cpu.mbc7_tilt_y = (keys[SDL_SCANCODE_K] ? 1 : 0) - (keys[SDL_SCANCODE_I] ? 1 : 0);
-    }
 }
 
 int main(int argc, char **argv)
 {
-    if (argc > 2)
+    std::filesystem::path rom_path;
+    std::filesystem::path controls_path;
+    int scale = DEFAULT_SCALE;
+    bool start_fullscreen = false;
+    for (int index = 1; index < argc; ++index)
     {
-        print_usage(argv[0]);
-        return 1;
-    }
-
-    if (argc == 2)
-    {
-        const std::string arg = argv[1];
+        const std::string arg = argv[index];
         if (arg == "-h" || arg == "--help")
         {
             print_usage(argv[0]);
             return 0;
+        }
+        if (arg == "--fullscreen")
+        {
+            start_fullscreen = true;
+        }
+        else if ((arg == "--scale" || arg == "--controls") && index + 1 < argc)
+        {
+            const std::string value = argv[++index];
+            if (arg == "--controls")
+            {
+                controls_path = value;
+                continue;
+            }
+            try
+            {
+                scale = std::stoi(value);
+            }
+            catch (const std::exception &)
+            {
+                scale = 0;
+            }
+            if (scale < 1 || scale > 10)
+            {
+                std::cerr << "The scale must be a whole number from 1 to 10.\n\n";
+                print_usage(argv[0]);
+                return 1;
+            }
+        }
+        else if (arg.empty() || arg[0] == '-' || !rom_path.empty())
+        {
+            print_usage(argv[0]);
+            return 1;
+        }
+        else
+        {
+            rom_path = arg;
         }
     }
 
@@ -191,9 +322,9 @@ int main(int argc, char **argv)
     std::filesystem::path save_path;
     std::filesystem::path state_path;
 
-    if (argc == 2)
+    std::cout << "LR35902 emulator\n";
+    if (!rom_path.empty())
     {
-        const std::filesystem::path rom_path(argv[1]);
         state_path = rom_path;
         state_path.replace_extension(".state");
         std::string rom_error;
@@ -214,19 +345,19 @@ int main(int argc, char **argv)
                 return 1;
             }
         }
+        std::cout << "Loading ROM: " << rom_path.string() << "\n\n";
     }
     else
     {
         initialize_demo_vram(cpu);
         load_demo_program(cpu);
-        std::cout << "LR35902 emulator\n";
         std::cout << "Executing a short demo program.\n\n";
     }
 
-    if (argc == 2)
+    KeyBindings bindings = default_key_bindings();
+    if (!load_key_bindings(controls_path, bindings))
     {
-        std::cout << "LR35902 emulator\n";
-        std::cout << "Loading ROM: " << argv[1] << "\n\n";
+        return 1;
     }
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) < 0)
@@ -235,16 +366,15 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    const int windowWidth = GB_WIDTH * SCALE;
-    const int windowHeight = GB_HEIGHT * SCALE;
-
+    const std::string title = rom_path.empty() ? "LR35902 Emu" : "LR35902 Emu - " + rom_path.stem().string();
     SDL_Window *window =
-        SDL_CreateWindow("LR35902 Emu",
+        SDL_CreateWindow(title.c_str(),
                          SDL_WINDOWPOS_CENTERED,
                          SDL_WINDOWPOS_CENTERED,
-                         windowWidth,
-                         windowHeight,
-                         SDL_WINDOW_SHOWN);
+                         GB_WIDTH * scale,
+                         GB_HEIGHT * scale,
+                         SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE |
+                             (start_fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
     if (!window)
     {
         std::cerr << "Window creation failed: " << SDL_GetError() << std::endl;
@@ -267,6 +397,10 @@ int main(int argc, char **argv)
         SDL_Quit();
         return 1;
     }
+    // The picture keeps its shape and is scaled by whole numbers, with black
+    // borders filling the rest of the window.
+    SDL_RenderSetLogicalSize(renderer, GB_WIDTH, GB_HEIGHT);
+    SDL_RenderSetIntegerScale(renderer, SDL_TRUE);
 
     SDL_RendererInfo renderer_info{};
     const bool renderer_vsync = SDL_GetRendererInfo(renderer, &renderer_info) == 0 &&
@@ -320,8 +454,10 @@ int main(int argc, char **argv)
     Uint64 next_frame_time = SDL_GetPerformanceCounter();
 
     bool running = true;
-    bool fast_forward = false;
+    bool paused = false;
     int cycle_accumulator = 0;
+    HeldActions held;
+    std::vector<SDL_GameController *> controllers;
 
     // Audio is dropped while fast-forwarding.
     const auto run_frame = [&](bool play_audio)
@@ -354,67 +490,142 @@ int main(int argc, char **argv)
         }
     };
 
+    const auto set_paused = [&](bool pause)
+    {
+        paused = pause;
+        SDL_SetWindowTitle(window, (paused ? title + " (paused)" : title).c_str());
+        if (audio_device != 0)
+        {
+            SDL_ClearQueuedAudio(audio_device);
+            SDL_PauseAudioDevice(audio_device, paused ? 1 : 0);
+        }
+    };
+
+    // Actions that happen once when pressed rather than while held.
+    const auto trigger = [&](Action action)
+    {
+        switch (action)
+        {
+        case Action::Quit:
+            running = false;
+            break;
+        case Action::Pause:
+            set_paused(!paused);
+            break;
+        case Action::Fullscreen:
+        {
+            const bool fullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
+            SDL_SetWindowFullscreen(window, fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+            break;
+        }
+        case Action::SaveState:
+        case Action::LoadState:
+        {
+            if (state_path.empty())
+            {
+                break;
+            }
+            std::string state_error;
+            if (action == Action::SaveState)
+            {
+                if (save_state_file(cpu, ppu, state_path, state_error))
+                {
+                    std::cout << "Saved state to " << state_path.string() << std::endl;
+                }
+                else
+                {
+                    std::cerr << "Unable to save state: " << state_error << std::endl;
+                }
+            }
+            else if (load_state_file(cpu, ppu, state_path, state_error))
+            {
+                std::cout << "Loaded state from " << state_path.string() << std::endl;
+                if (audio_device != 0)
+                {
+                    SDL_ClearQueuedAudio(audio_device);
+                }
+            }
+            else
+            {
+                std::cerr << "Unable to load state: " << state_error << std::endl;
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    };
+
     while (running)
     {
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
-            if (event.type == SDL_QUIT)
+            switch (event.type)
             {
+            case SDL_QUIT:
                 running = false;
-            }
-            else if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP)
+                break;
+            case SDL_KEYDOWN:
+            case SDL_KEYUP:
             {
+                const std::optional<Action> action = action_for_key(bindings, event.key.keysym.sym);
+                if (!action)
+                {
+                    break;
+                }
                 const bool pressed = event.type == SDL_KEYDOWN;
-                const SDL_Keycode key = event.key.keysym.sym;
-                if (pressed && key == SDLK_ESCAPE)
+                held.keyboard[static_cast<std::size_t>(*action)] = pressed;
+                if (pressed && event.key.repeat == 0)
                 {
-                    running = false;
+                    trigger(*action);
                 }
-                else if (key == SDLK_TAB)
+                break;
+            }
+            case SDL_CONTROLLERDEVICEADDED:
+                if (SDL_GameController *controller = SDL_GameControllerOpen(event.cdevice.which))
                 {
-                    fast_forward = pressed;
+                    controllers.push_back(controller);
+                    std::cout << "Controller connected: " << SDL_GameControllerName(controller) << std::endl;
                 }
-                else if (pressed && event.key.repeat == 0 && key == SDLK_F5 && !state_path.empty())
+                break;
+            case SDL_CONTROLLERDEVICEREMOVED:
+            {
+                SDL_GameController *controller = SDL_GameControllerFromInstanceID(event.cdevice.which);
+                controllers.erase(std::remove(controllers.begin(), controllers.end(), controller), controllers.end());
+                SDL_GameControllerClose(controller);
+                held.buttons.fill(false); // Nothing stays held by a controller that has gone.
+                held.axes.fill(false);
+                break;
+            }
+            case SDL_CONTROLLERBUTTONDOWN:
+            case SDL_CONTROLLERBUTTONUP:
+            {
+                const std::optional<Action> action =
+                    action_for_controller_button(static_cast<SDL_GameControllerButton>(event.cbutton.button));
+                if (action)
                 {
-                    std::string state_error;
-                    if (save_state_file(cpu, ppu, state_path, state_error))
-                    {
-                        std::cout << "Saved state to " << state_path.string() << std::endl;
-                    }
-                    else
-                    {
-                        std::cerr << "Unable to save state: " << state_error << std::endl;
-                    }
+                    held.buttons[static_cast<std::size_t>(*action)] = event.type == SDL_CONTROLLERBUTTONDOWN;
                 }
-                else if (pressed && event.key.repeat == 0 && key == SDLK_F8 && !state_path.empty())
-                {
-                    std::string state_error;
-                    if (load_state_file(cpu, ppu, state_path, state_error))
-                    {
-                        std::cout << "Loaded state from " << state_path.string() << std::endl;
-                        if (audio_device != 0)
-                        {
-                            SDL_ClearQueuedAudio(audio_device);
-                        }
-                    }
-                    else
-                    {
-                        std::cerr << "Unable to load state: " << state_error << std::endl;
-                    }
-                }
-                else
-                {
-                    update_joypad_from_key(cpu, key, pressed);
-                    update_tilt_from_keys(cpu);
-                }
+                break;
+            }
+            case SDL_CONTROLLERAXISMOTION:
+                update_held_axis(held, static_cast<SDL_GameControllerAxis>(event.caxis.axis), event.caxis.value);
+                break;
+            default:
+                break;
             }
         }
         if (!running)
             break;
+        apply_held_actions(cpu, held);
 
         const Uint64 now = SDL_GetPerformanceCounter();
-        if (fast_forward)
+        if (paused)
+        {
+            next_frame_time = now + ticks_per_frame;
+        }
+        else if (held.held(Action::FastForward))
         {
             for (int frame = 0; frame < FAST_FORWARD_FRAMES; ++frame)
             {
@@ -450,6 +661,10 @@ int main(int argc, char **argv)
         }
     }
 
+    for (SDL_GameController *controller : controllers)
+    {
+        SDL_GameControllerClose(controller);
+    }
     if (audio_device != 0)
     {
         SDL_CloseAudioDevice(audio_device);
