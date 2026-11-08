@@ -27,3 +27,38 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+  rom-suites:
+    name: ROM test suites
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SDL2 and Pillow
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev python3-pil
+
+      # The suites are pinned in fetch_test_roms.sh, so they only need
+      # downloading again when it changes.
+      - name: Cache test ROMs
+        uses: actions/cache@v4
+        with:
+          path: build/test-roms
+          key: test-roms-${{ hashFiles('tests/fetch_test_roms.sh') }}
+
+      - name: Download test ROMs
+        run: tests/fetch_test_roms.sh
+
+      - name: Build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j "$(nproc)" --target rom_test_runner
+
+      - name: Run ROM test suites
+        run: tests/run_rom_suites.sh --roms build/test-roms
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rom-results
+          path: build/rom-results
