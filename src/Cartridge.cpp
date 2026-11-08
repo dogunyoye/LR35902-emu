@@ -118,7 +118,7 @@ namespace
     // The DMG and MGB boot ROMs leave the Nintendo logo from the cartridge
     // header and a registered-trademark tile in VRAM, and the logo in the
     // background map. Each logo bit is doubled horizontally and vertically.
-    void load_boot_logo(CPU_LR35902 &cpu)
+    void load_dmg_boot_logo_impl(CPU_LR35902 &cpu)
     {
         constexpr std::array<uint8_t, 8> TRADEMARK_TILE = {0x3C, 0x42, 0xB9, 0xA5, 0xB9, 0xA5, 0x42, 0x3C};
         std::size_t address = 0x8010;
@@ -161,6 +161,11 @@ namespace
         return rom.size() == 0x100000 &&
                std::equal(NINTENDO_LOGO.begin(), NINTENDO_LOGO.end(), rom.begin() + SECOND_GAME_LOGO);
     }
+}
+
+void load_dmg_boot_logo(CPU_LR35902 &cpu)
+{
+    load_dmg_boot_logo_impl(cpu);
 }
 
 bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error,
@@ -288,7 +293,7 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     cpu.apu.cgb = cgb_hardware;
     if (!sgb && !cgb_hardware)
     {
-        load_boot_logo(cpu);
+        load_dmg_boot_logo_impl(cpu);
     }
     switch (model)
     {
@@ -336,6 +341,11 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
         // indices are left where the boot ROM's colourisation stopped.
         cpu.bg_palette_index = 0x88;
         cpu.obj_palette_index = 0x90;
+        if (!cgb_cartridge)
+        {
+            cpu.object_priority_mode = 1; // DMG object priority
+            load_dmg_compatibility_palettes(cpu);
+        }
         cpu.af.reg16 = model == GameBoyModel::Agb ? 0x1100 : 0x1180;
         cpu.bc.reg16 = model == GameBoyModel::Agb ? 0x0100 : 0x0000;
         cpu.de.reg16 = cgb_cartridge ? 0xFF56 : 0x0008;

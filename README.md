@@ -29,7 +29,7 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | Sub-M-cycle peripheral conformance (DMA bus conflicts) | :soon: planned |
 | Other mappers (MBC6, HuC3, etc.) | :soon: planned |
 | Game Boy Color: CGB mode (VRAM and WRAM banks, double speed, colour palettes, tile attributes, VRAM DMA) and DMG compatibility mode | :white_check_mark: done |
-| Game Boy Color boot colourisation of DMG games | :soon: planned |
+| Game Boy Color boot colourisation of DMG games, and screen colour correction | :white_check_mark: done |
 | Full PPU and hardware fidelity | :soon: planned |
 
 ## Building
@@ -98,7 +98,9 @@ Run a supported ROM-only (32 KiB), MBC1, MBC2, MBC3, MBC5, MBC7, or HuC1 cartrid
 ./build/lr35902-emu /path/to/game.gb
 ```
 
-Cartridges made for the Game Boy Color (including those that also run on the original Game Boy) run on an emulated CGB in colour; other cartridges run on an emulated DMG.
+Cartridges made for the Game Boy Color (including those that also run on the original Game Boy) run on an emulated CGB in colour; other cartridges run on an emulated DMG. `--model cgb` runs games made for the original Game Boy on a CGB instead, coloured the way its boot ROM colours them: Nintendo's own games get palettes chosen for them, others a default. `--dmg-palette` picks one of the boot ROM's manual choices instead (`right`, `left`, `up`, `down`, or one of those with `+a` or `+b`, the buttons held during the logo on a real CGB). `--model dmg` runs games that also work on the original Game Boy on a DMG.
+
+Game Boy Color colours are adjusted to look like they did on its screen, which was darker and less saturated than a modern display; F9 or `--no-color-correction` turns this off. Screenshots taken by the test runner always keep the exact colours.
 
 Battery-backed cartridge RAM is loaded from and saved to a same-basename `.sav` file beside the ROM. MBC3 saves also store the real-time clock in the format BGB and VBA-M use, and the clock catches up on time that passed while the emulator was closed.
 
@@ -113,6 +115,7 @@ Battery-backed cartridge RAM is loaded from and saved to a same-basename `.sav` 
 | Pause | P | |
 | Save state / load state | F5 / F8 | |
 | Fullscreen | F11 | |
+| Colour correction on or off (Game Boy Color) | F9 | |
 | Tilt (MBC7 cartridges) | I, K, J, L | Right stick |
 | Quit | Escape | |
 
@@ -126,7 +129,7 @@ start = Return, Keypad Enter
 fast_forward = Backspace
 ```
 
-The actions are `up`, `down`, `left`, `right`, `a`, `b`, `select`, `start`, `tilt_up`, `tilt_down`, `tilt_left`, `tilt_right`, `fast_forward`, `pause`, `save_state`, `load_state`, `fullscreen`, and `quit`. The emulator stops with a message if the file has a mistake or binds one key to two actions.
+The actions are `up`, `down`, `left`, `right`, `a`, `b`, `select`, `start`, `tilt_up`, `tilt_down`, `tilt_left`, `tilt_right`, `fast_forward`, `pause`, `save_state`, `load_state`, `fullscreen`, `color_correction`, and `quit`. The emulator stops with a message if the file has a mistake or binds one key to two actions.
 
 The window can be resized and scales the picture by whole numbers. `--scale N` sets its starting size (1–10 times the Game Boy's 160×144, default 4) and `--fullscreen` starts in fullscreen.
 
@@ -160,6 +163,7 @@ Show usage/help:
 │   ├── APU.cpp          # Sound channels, frame sequencer, and mixing
 │   ├── SaveState.cpp    # Save state format, loading, and saving
 │   ├── Controls.cpp     # Key bindings, controls file, and controller layout
+│   ├── CgbCompatibility.cpp # CGB boot ROM palettes for games made for the original Game Boy
 │   ├── Serial.cpp       # Internal-clock serial transfers and test output
 │   ├── Timer.cpp        # Divider/timer register updates
 │   └── main.cpp         # CLI entry point and demo runner
@@ -184,6 +188,7 @@ Show usage/help:
 
 - [Pan Docs](https://gbdev.io/pandocs/) — the canonical Game Boy hardware reference
 - [gbops](https://izik1.github.io/gbops/) — opcode table / timing reference
+- [SameBoy](https://github.com/LIJI32/SameBoy) — the CGB boot ROM palette tables in `src/CgbCompatibility.cpp` come from its free boot ROM reimplementation (Expat License; the notice is in that file)
 
 ## License
 

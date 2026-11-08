@@ -33,6 +33,7 @@ namespace
             {"save_state", {SDLK_F5}},
             {"load_state", {SDLK_F8}},
             {"fullscreen", {SDLK_F11}},
+            {"color_correction", {SDLK_F9}},
             {"quit", {SDLK_ESCAPE}},
         }};
         return info;

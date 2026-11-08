@@ -535,6 +535,47 @@ static void test_mbc7_eeprom_and_accelerometer()
     assert(cpu.cartridge_ram[10] == 0xFF && cpu.cartridge_ram[11] == 0xFF);
 }
 
+static std::vector<uint8_t> make_titled_rom(const char *title, uint8_t old_licensee)
+{
+    std::vector<uint8_t> rom(0x8000, 0);
+    for (std::size_t index = 0; title[index] != '\0'; ++index)
+    {
+        rom[0x0134 + index] = static_cast<uint8_t>(title[index]);
+    }
+    rom[0x014B] = old_licensee;
+    return rom;
+}
+
+static void test_dmg_compatibility_palettes()
+{
+    bool wants_logo = true;
+    // Nintendo's games are recognised by title checksum.
+    assert(dmg_compatibility_combination(make_titled_rom("SUPERMARIOLAND3", 0x01), wants_logo) == 32);
+    assert(!wants_logo);
+    // POKEMON BLUE shares its checksum; its fourth letter picks the entry.
+    assert(dmg_compatibility_combination(make_titled_rom("POKEMON BLUE", 0x01), wants_logo) == 11);
+    assert(dmg_compatibility_combination(make_titled_rom("POKXMON BLUE", 0x01), wants_logo) == 0);
+    // Other publishers' games get the default.
+    assert(dmg_compatibility_combination(make_titled_rom("SUPERMARIOLAND3", 0x08), wants_logo) == 0);
+    std::vector<uint8_t> new_licensee = make_titled_rom("SUPERMARIOLAND3", 0x33);
+    new_licensee[0x0144] = '0';
+    new_licensee[0x0145] = '1';
+    assert(dmg_compatibility_combination(new_licensee, wants_logo) == 32);
+
+    std::string error;
+    CPU_LR35902 cpu{};
+    assert(load_cartridge(cpu, make_titled_rom("SUPERMARIOLAND3", 0x01), error, GameBoyModel::Cgb));
+    assert(cpu.cgb_hardware && !cpu.cgb_mode);
+    assert(cpu.object_priority_mode == 1);
+    // Combination 32: BG palette 8 ($7FFF, $42B5, $3DC8, $0000).
+    assert(cpu.bg_palette_ram[2] == 0xB5 && cpu.bg_palette_ram[3] == 0x42);
+    assert(load_dmg_compatibility_palettes(cpu, "up")); // Combination 5: palette 0 throughout
+    assert(cpu.bg_palette_ram[2] == 0xBF && cpu.bg_palette_ram[3] == 0x32);
+    assert(cpu.obj_palette_ram[10] == 0xBF && cpu.obj_palette_ram[11] == 0x32);
+    assert(!load_dmg_compatibility_palettes(cpu, "sideways"));
+    assert(dmg_compatibility_palette_names().size() == 12);
+}
+
 int main()
 {
     test_rom_only_cartridge();
@@ -550,5 +591,6 @@ int main()
     test_mbc3_rtc_persistence();
     test_huc1_banking_ram_and_infrared();
     test_mbc7_eeprom_and_accelerometer();
+    test_dmg_compatibility_palettes();
     return 0;
 }

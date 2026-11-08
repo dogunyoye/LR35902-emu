@@ -421,11 +421,24 @@ namespace
         }
         const std::uint8_t visible_background = (lcdc & 0x01) != 0 ? pixel.background_color : 0;
         const std::uint8_t bgp = ppu.bgp_write_pending ? ppu.bgp_write_blend : cpu.memory[BGP];
-        std::uint32_t color = shade_color(static_cast<std::uint8_t>((bgp >> (visible_background * 2)) & 0x03));
+        const std::uint8_t background_shade = static_cast<std::uint8_t>((bgp >> (visible_background * 2)) & 0x03);
+        // In DMG compatibility mode the shades pick colours from CGB palette RAM:
+        // BG palette 0, and OBJ palette 0 or 1.
+        std::uint32_t color =
+            cpu.cgb_hardware ? cgb_color(cpu.bg_palette_ram, 0, background_shade) : shade_color(background_shade);
         if (pixel.object_color != 0 && (lcdc & 0x02) != 0 &&
             ((pixel.object_attributes & 0x80) == 0 || visible_background == 0))
         {
-            color = palette_color(cpu, (pixel.object_attributes & 0x10) != 0 ? OBP1 : OBP0, pixel.object_color);
+            const bool obp1 = (pixel.object_attributes & 0x10) != 0;
+            if (cpu.cgb_hardware)
+            {
+                const std::uint8_t obp = cpu.memory[obp1 ? OBP1 : OBP0];
+                color = cgb_color(cpu.obj_palette_ram, obp1 ? 1 : 0, (obp >> (pixel.object_color * 2)) & 0x03);
+            }
+            else
+            {
+                color = palette_color(cpu, obp1 ? OBP1 : OBP0, pixel.object_color);
+            }
         }
         if (framebuffer != nullptr)
         {

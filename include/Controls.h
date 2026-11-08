@@ -28,6 +28,7 @@ enum class Action : std::size_t
     SaveState,
     LoadState,
     Fullscreen,
+    ColorCorrection,
     Quit,
     Count
 };

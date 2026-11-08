@@ -35,6 +35,14 @@ namespace
                   << "Options:\n"
                   << "  --scale N        Start with the window N times the Game Boy's size (1-10, default 4)\n"
                   << "  --fullscreen     Start in fullscreen\n"
+                  << "  --model MODEL    auto (the default: a Game Boy Color for cartridges made for it,\n"
+                  << "                   otherwise the original Game Boy), dmg, or cgb\n"
+                  << "  --dmg-palette P  On a Game Boy Color, colour a game made for the original Game Boy\n"
+                  << "                   with one of the boot ROM's manual choices instead of its own:\n"
+                  << "                   right, left, up, down, right+a, left+a, up+a, down+a, right+b,\n"
+                  << "                   left+b, up+b, or down+b (implies --model cgb)\n"
+                  << "  --no-color-correction\n"
+                  << "                   Show Game Boy Color colours unadjusted for its screen\n"
                   << "  --controls FILE  Read key bindings from FILE instead of controls.cfg in the\n"
                   << "                   emulator's settings folder\n"
                   << "  -h, --help       Show this help\n"
@@ -123,7 +131,14 @@ namespace
         }
     }
 
-    bool load_rom(CPU_LR35902 &cpu, const std::filesystem::path &path, std::string &error)
+    enum class ModelChoice
+    {
+        Auto,
+        Dmg,
+        Cgb
+    };
+
+    bool load_rom(CPU_LR35902 &cpu, const std::filesystem::path &path, ModelChoice model, std::string &error)
     {
         std::ifstream file(path, std::ios::binary);
         if (!file)
@@ -133,9 +148,12 @@ namespace
         }
 
         std::vector<uint8_t> rom((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        // Cartridges made for the Game Boy Color run on a CGB, others on a DMG.
-        const bool cgb_cartridge = rom.size() > 0x143 && (rom[0x143] & 0x80) != 0;
-        return load_cartridge(cpu, std::move(rom), error, cgb_cartridge ? GameBoyModel::Cgb : GameBoyModel::DmgABC);
+        // By default, cartridges made for the Game Boy Color run on a CGB and
+        // others on a DMG. Game Boy Color-only cartridges always need a CGB.
+        const std::uint8_t cgb_flag = rom.size() > 0x143 ? rom[0x143] : 0;
+        const bool cgb = (cgb_flag & 0xC0) == 0xC0 || model == ModelChoice::Cgb ||
+                         (model == ModelChoice::Auto && (cgb_flag & 0x80) != 0);
+        return load_cartridge(cpu, std::move(rom), error, cgb ? GameBoyModel::Cgb : GameBoyModel::DmgABC);
     }
 
     // Reads key bindings from the given controls file, or from controls.cfg in
@@ -173,6 +191,30 @@ namespace
         }
         std::cout << "Using controls from " << path.string() << "\n";
         return true;
+    }
+
+    // The Game Boy Color's screen shows its colours darker and less saturated
+    // than a modern display does. This is the curve Gambatte uses to imitate
+    // it, applied as frames are shown so screenshots keep the exact colours.
+    std::vector<std::uint32_t> build_corrected_colors()
+    {
+        std::vector<std::uint32_t> colors(0x8000);
+        for (std::uint32_t index = 0; index < colors.size(); ++index)
+        {
+            const std::uint32_t r = index & 0x1F;
+            const std::uint32_t g = (index >> 5) & 0x1F;
+            const std::uint32_t b = (index >> 10) & 0x1F;
+            const auto scale = [](std::uint32_t value) { return value * 255 / 248; };
+            colors[index] = 0xFF000000u | scale((r * 13 + g * 2 + b) >> 1) << 16 | scale((g * 3 + b) << 1) << 8 |
+                            scale((r * 3 + g * 2 + b * 11) >> 1);
+        }
+        return colors;
+    }
+
+    // The RGB555 colour a CGB framebuffer pixel was widened from.
+    std::size_t cgb_color_index(std::uint32_t pixel)
+    {
+        return ((pixel >> 19) & 0x1F) | ((pixel >> 11) & 0x1F) << 5 | ((pixel >> 3) & 0x1F) << 10;
     }
 
     std::optional<JoypadButton> joypad_button_for(Action action)
@@ -273,6 +315,9 @@ int main(int argc, char **argv)
     std::filesystem::path rom_path;
     std::filesystem::path controls_path;
     int scale = DEFAULT_SCALE;
+    ModelChoice model = ModelChoice::Auto;
+    std::string dmg_palette;
+    bool color_correction = true;
     bool start_fullscreen = false;
     for (int index = 1; index < argc; ++index)
     {
@@ -286,12 +331,40 @@ int main(int argc, char **argv)
         {
             start_fullscreen = true;
         }
-        else if ((arg == "--scale" || arg == "--controls") && index + 1 < argc)
+        else if (arg == "--no-color-correction")
+        {
+            color_correction = false;
+        }
+        else if ((arg == "--scale" || arg == "--controls" || arg == "--model" || arg == "--dmg-palette") &&
+                 index + 1 < argc)
         {
             const std::string value = argv[++index];
             if (arg == "--controls")
             {
                 controls_path = value;
+                continue;
+            }
+            if (arg == "--model")
+            {
+                if (value != "auto" && value != "dmg" && value != "cgb")
+                {
+                    std::cerr << "The model must be auto, dmg, or cgb.\n\n";
+                    print_usage(argv[0]);
+                    return 1;
+                }
+                model = value == "dmg" ? ModelChoice::Dmg : value == "cgb" ? ModelChoice::Cgb : ModelChoice::Auto;
+                continue;
+            }
+            if (arg == "--dmg-palette")
+            {
+                const std::vector<std::string> names = dmg_compatibility_palette_names();
+                if (std::find(names.begin(), names.end(), value) == names.end())
+                {
+                    std::cerr << "Unknown DMG palette \"" << value << "\".\n\n";
+                    print_usage(argv[0]);
+                    return 1;
+                }
+                dmg_palette = value;
                 continue;
             }
             try
@@ -330,11 +403,21 @@ int main(int argc, char **argv)
         state_path = rom_path;
         state_path.replace_extension(".state");
         std::string rom_error;
-        if (!load_rom(cpu, rom_path, rom_error))
+        if (!dmg_palette.empty() && model == ModelChoice::Dmg)
+        {
+            std::cerr << "--dmg-palette needs a Game Boy Color, not --model dmg.\n\n";
+            print_usage(argv[0]);
+            return 1;
+        }
+        if (!load_rom(cpu, rom_path, dmg_palette.empty() ? model : ModelChoice::Cgb, rom_error))
         {
             std::cerr << "Unable to load ROM: " << rom_path << " (" << rom_error << ")\n\n";
             print_usage(argv[0]);
             return 1;
+        }
+        if (!dmg_palette.empty() && !cpu.cgb_mode)
+        {
+            load_dmg_compatibility_palettes(cpu, dmg_palette);
         }
 
         if (cpu.cartridge_battery_backed)
@@ -422,6 +505,8 @@ int main(int argc, char **argv)
 
     PPU_LR35902 ppu{};
     cpu.ppu = &ppu;
+    const std::vector<std::uint32_t> corrected_colors = build_corrected_colors();
+    std::vector<std::uint32_t> corrected_frame(PPU_LR35902::PIXEL_COUNT);
 
     SDL_AudioSpec audio_request{};
     audio_request.freq = APU_LR35902::SAMPLE_RATE;
@@ -514,6 +599,10 @@ int main(int argc, char **argv)
             break;
         case Action::Pause:
             set_paused(!paused);
+            break;
+        case Action::ColorCorrection:
+            color_correction = !color_correction;
+            std::cout << "Colour correction " << (color_correction ? "on" : "off") << std::endl;
             break;
         case Action::Fullscreen:
         {
@@ -649,7 +738,18 @@ int main(int argc, char **argv)
             }
         }
 
-        SDL_UpdateTexture(texture, nullptr, ppu.framebuffer.data(), GB_WIDTH * sizeof(uint32_t));
+        if (cpu.cgb_hardware && color_correction)
+        {
+            for (std::size_t index = 0; index < corrected_frame.size(); ++index)
+            {
+                corrected_frame[index] = corrected_colors[cgb_color_index(ppu.framebuffer[index])];
+            }
+            SDL_UpdateTexture(texture, nullptr, corrected_frame.data(), GB_WIDTH * sizeof(uint32_t));
+        }
+        else
+        {
+            SDL_UpdateTexture(texture, nullptr, ppu.framebuffer.data(), GB_WIDTH * sizeof(uint32_t));
+        }
         SDL_RenderClear(renderer);
         SDL_RenderCopy(renderer, texture, nullptr, nullptr);
         SDL_RenderPresent(renderer);

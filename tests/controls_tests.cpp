@@ -9,6 +9,7 @@ static void test_defaults()
     assert(action_for_key(bindings, SDLK_RETURN) == Action::Start);
     assert(action_for_key(bindings, SDLK_TAB) == Action::FastForward);
     assert(action_for_key(bindings, SDLK_p) == Action::Pause);
+    assert(action_for_key(bindings, SDLK_F9) == Action::ColorCorrection);
     assert(!action_for_key(bindings, SDLK_q));
     assert(std::string(action_name(Action::FastForward)) == "fast_forward");
 }

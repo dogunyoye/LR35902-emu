@@ -244,4 +244,16 @@ void write_cartridge_rtc(CPU_LR35902 &cpu, uint8_t value);
 bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &error,
                     GameBoyModel model = GameBoyModel::DmgABC);
 bool load_cartridge_ram(CPU_LR35902 &cpu, const std::filesystem::path &path, std::string &error);
+// What the DMG boot ROM leaves in VRAM: the logo's tiles and tilemap.
+void load_dmg_boot_logo(CPU_LR35902 &cpu);
+// The CGB boot ROM colours games not made for the Game Boy Color: Nintendo's
+// own games by a palette combination picked from the title, others with a
+// default. Returns the combination and whether the game wants the DMG logo
+// left in VRAM.
+std::size_t dmg_compatibility_combination(const std::vector<uint8_t> &rom, bool &wants_dmg_logo);
+// Loads those palettes into palette RAM, or instead one of the combinations
+// the player could pick by holding buttons during the logo ("right", "up+a",
+// ...). Returns false for an unknown choice.
+bool load_dmg_compatibility_palettes(CPU_LR35902 &cpu, const std::string &manual_choice = "");
+std::vector<std::string> dmg_compatibility_palette_names();
 bool save_cartridge_ram(const CPU_LR35902 &cpu, const std::filesystem::path &path, std::string &error);

@@ -362,12 +362,30 @@ static void test_cgb_tile_attributes_objects_and_priority()
     assert(ppu.framebuffer[12] == 0xFF00FF00); // The background is still drawn
 }
 
+// In DMG compatibility mode BGP's shades pick colours from BG palette 0.
+static void test_dmg_compatibility_colours()
+{
+    std::vector<uint8_t> rom(0x8000, 0);
+    std::string error;
+    CPU_LR35902 cpu{};
+    assert(load_cartridge(cpu, std::move(rom), error, GameBoyModel::Cgb));
+    PPU_LR35902 ppu{};
+    cpu.ppu = &ppu;
+    std::fill(cpu.memory.begin() + 0x8000, cpu.memory.begin() + 0xA000, 0);
+    cpu.memory[0xFF40] = 0x91;
+    cpu.memory[0xFF47] = 0x1B; // Colour 0 shows shade 3
+    set_cgb_color(cpu.bg_palette_ram, 0, 3, 0x7C00);
+    update_ppu(cpu, ppu, 456);
+    assert(ppu.framebuffer[0] == 0xFF0000FF);
+}
+
 int main()
 {
     test_ppu_modes_scanlines_and_background();
     test_lcd_off_resets_ly();
     test_ly_reads_zero_on_line_153();
     test_cgb_tile_attributes_objects_and_priority();
+    test_dmg_compatibility_colours();
     test_ppu_window_composition();
     test_ppu_sprite_priority_palettes_flips_and_8x16();
     test_stat_mode_interrupt_edges();
