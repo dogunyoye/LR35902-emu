@@ -363,6 +363,30 @@ static void test_cgb_tile_attributes_objects_and_priority()
 }
 
 // In DMG compatibility mode BGP's shades pick colours from BG palette 0.
+// Moving WX under the window's last pixel inserts a pixel there; the line
+// still ends at the screen's edge.
+static void test_window_pixel_insertion_at_line_end()
+{
+    CPU_LR35902 cpu{};
+    PPU_LR35902 ppu{};
+    cpu.memory[0xFF40] = 0xB1; // LCD, window, unsigned tiles, and background enabled
+    cpu.memory[0xFF47] = 0xE4;
+    std::fill(cpu.memory.begin() + 0x8000, cpu.memory.begin() + 0x8010, 0xFF);
+    for (int dot = 0; dot < 2 * 154 * 456; ++dot)
+    {
+        if (ppu.mode == 3 && ppu.pixel_x == 40)
+        {
+            cpu.memory[0xFF4B] = 165;
+        }
+        else if (ppu.mode != 3)
+        {
+            cpu.memory[0xFF4B] = 13;
+        }
+        update_ppu(cpu, ppu, 1);
+        assert(ppu.pixel_x <= 160);
+    }
+}
+
 static void test_dmg_compatibility_colours()
 {
     std::vector<uint8_t> rom(0x8000, 0);
@@ -386,6 +410,7 @@ int main()
     test_ly_reads_zero_on_line_153();
     test_cgb_tile_attributes_objects_and_priority();
     test_dmg_compatibility_colours();
+    test_window_pixel_insertion_at_line_end();
     test_ppu_window_composition();
     test_ppu_sprite_priority_palettes_flips_and_8x16();
     test_stat_mode_interrupt_edges();

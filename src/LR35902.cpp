@@ -543,12 +543,14 @@ int execute_instruction(CPU_LR35902 &cpu)
         if (cpu.cgb_mode && cpu.speed_switch_armed)
         {
             // Switches between normal and double speed instead of stopping.
+            // DIV resets at the old speed.
+            reset_divider(cpu);
             cpu.double_speed = !cpu.double_speed;
             cpu.speed_switch_armed = false;
-            reset_divider(cpu);
         }
         else
         {
+            reset_divider(cpu);
             cpu.stopped = true;
         }
         cycles = 4;
@@ -1552,9 +1554,11 @@ int step_cpu(CPU_LR35902 &cpu)
 
     if (cpu.stopped)
     {
-        // The system clock is stopped; only the cartridge's RTC keeps time.
-        update_cartridge_rtc(cpu, 4);
-        apu_tick_stopped(cpu.apu, 4);
+        // The system clock is stopped; only the cartridge's RTC keeps time,
+        // and audio output decays. Both run at normal speed.
+        const int fixed_speed_cycles = cpu.double_speed ? 2 : 4;
+        update_cartridge_rtc(cpu, fixed_speed_cycles);
+        apu_tick_stopped(cpu.apu, fixed_speed_cycles);
         return 4;
     }
 

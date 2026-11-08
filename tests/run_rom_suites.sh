@@ -43,15 +43,16 @@ model_for() {
 }
 
 run_one() {
-  suite=$1 rom=$2 model=$3 cycles=$4
-  log="$out/$suite-$(basename "$rom" .gb | tr ' ,()' '____').log"
+  suite=$1 rom=$2 model=$3 cycles=$4 relative=${2#"$5"/}
+  # Named by path, as ROMs in different folders can share a name.
+  log="$out/$suite-$(printf '%s' "${relative%.gb}" | tr '/ ,()' '_____').log"
   "$RUNNER" "$rom" "$cycles" "$model" >"$log" 2>&1
   case $? in
     0) result=PASS ;;
     1) result=FAIL ;;
     *) result=NORESULT ;;
   esac
-  printf '%s\t%s\t%s\n' "$result" "$suite" "${rom#"$5"/}"
+  printf '%s\t%s\t%s\n' "$result" "$suite" "$relative"
 }
 export -f run_one model_for
 export RUNNER out

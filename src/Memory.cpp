@@ -12,16 +12,12 @@ const uint16_t OAM_START = 0xFE00;
 const uint16_t OAM_END = 0xFE9F;
 const uint16_t OAM_UNUSABLE_START = 0xFEA0;
 const uint16_t OAM_UNUSABLE_END = 0xFEFF;
-const uint16_t HRAM_START = 0xFF80;
-const uint16_t HRAM_END = 0xFFFE;
 const uint16_t JOYP_REG = 0xFF00;
 const uint16_t SB_REG = 0xFF01;
 const uint16_t SC_REG = 0xFF02;
 
 namespace
 {
-    uint8_t cpu_read_unrestricted(CPU_LR35902 &cpu, uint16_t address);
-
     // $FF4C-$FF7F hold the CGB's registers, handled by read_cgb_register.
     bool is_unmapped_io(const CPU_LR35902 &cpu, uint16_t address)
     {
@@ -623,11 +619,12 @@ uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
     {
         return cgb_dma_conflict(cpu, address) ? 0xFF : cpu_read_unrestricted(cpu, address);
     }
-    const bool hram_access = address >= HRAM_START && address <= HRAM_END;
+    // I/O, HRAM, and IE are inside the CPU, away from the bus DMA uses.
+    const bool internal_access = address >= 0xFF00;
     const bool echo_wram_access = address >= ECHO_START && address <= ECHO_END;
     const bool rom_access_during_vram_dma = address >= 0x0100 && address < 0x8000 &&
                                             cpu.oam_dma_source >= 0x80 && cpu.oam_dma_source <= 0x9F;
-    if (cpu.oam_dma_active && !hram_access && !echo_wram_access &&
+    if (cpu.oam_dma_active && !internal_access && !echo_wram_access &&
         !rom_access_during_vram_dma && address != 0xFF46)
     {
         return 0xFF;
@@ -770,6 +767,12 @@ namespace
             if ((value & 0x80) != 0)
             {
                 cpu.hdma_hblank_active = true;
+                // Started during HBlank, or with the LCD off when STAT also
+                // shows mode 0, the first block is copied straight away.
+                if (cpu.ppu != nullptr && (cpu.ppu->mode == 0 || !cpu.ppu->lcd_enabled))
+                {
+                    cpu_hblank_started(cpu);
+                }
             }
             else
             {
@@ -846,7 +849,7 @@ namespace
             return;
         }
         if (cpu.oam_dma_active && address != 0xFF46 &&
-            (cpu.cgb_hardware ? cgb_dma_conflict(cpu, address) : !(address >= HRAM_START && address <= HRAM_END)))
+            (cpu.cgb_hardware ? cgb_dma_conflict(cpu, address) : address < 0xFF00))
         {
             return;
         }

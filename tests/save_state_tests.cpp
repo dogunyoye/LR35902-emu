@@ -1,5 +1,6 @@
 #include "SaveState.h"
 
+#include <algorithm>
 #include <cassert>
 
 namespace
@@ -83,9 +84,46 @@ static void test_rejected_states_leave_machine_unchanged()
     assert(serialize_state(other, other_ppu) == other_before);
 }
 
+static void test_out_of_range_states_are_rejected()
+{
+    CPU_LR35902 cpu{};
+    PPU_LR35902 ppu{};
+    std::string error;
+    assert(load_cartridge(cpu, make_rom(), error));
+    cpu.ppu = &ppu; // Loading a cartridge resets the CPU.
+    run_steps(cpu, 1000);
+    const std::vector<uint8_t> before = serialize_state(cpu, ppu);
+
+    // A WRAM bank past the last one.
+    CPU_LR35902 bad = cpu;
+    bad.wram_bank = 9;
+    assert(!deserialize_state(cpu, ppu, serialize_state(bad, ppu), error));
+    assert(error == "the save state is damaged.");
+
+    // More pixels waiting than the PPU holds.
+    PPU_LR35902 bad_ppu = ppu;
+    bad_ppu.pending_count = 1000;
+    assert(!deserialize_state(cpu, ppu, serialize_state(cpu, bad_ppu), error));
+
+    // A bool stored as 2: find IME's byte by saving with it both ways.
+    CPU_LR35902 ime_on = cpu;
+    CPU_LR35902 ime_off = cpu;
+    ime_on.ime = true;
+    ime_off.ime = false;
+    std::vector<uint8_t> bad_bool = serialize_state(ime_on, ppu);
+    const std::vector<uint8_t> other = serialize_state(ime_off, ppu);
+    const auto difference = std::mismatch(bad_bool.begin(), bad_bool.end(), other.begin()).first;
+    assert(difference != bad_bool.end());
+    *difference = 2;
+    assert(!deserialize_state(cpu, ppu, bad_bool, error));
+
+    assert(serialize_state(cpu, ppu) == before);
+}
+
 int main()
 {
     test_round_trip_resumes_identically();
     test_rejected_states_leave_machine_unchanged();
+    test_out_of_range_states_are_rejected();
     return 0;
 }

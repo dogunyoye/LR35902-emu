@@ -198,6 +198,33 @@ static void test_cgb_speed_switch_and_dma()
     assert(cpu_read(cpu, 0xFF55) == 0xFF && !cpu.hdma_hblank_active);
 }
 
+// STAT shows mode 0 with the LCD off, so an HBlank DMA started then copies its
+// first block straight away.
+static void test_hblank_dma_started_in_mode_0()
+{
+    std::string error;
+    CPU_LR35902 cpu{};
+    PPU_LR35902 ppu{};
+    std::vector<uint8_t> rom = make_cgb_rom();
+    for (int index = 0; index < 0x20; ++index)
+    {
+        rom[0x4000 + index] = static_cast<uint8_t>(index + 1);
+    }
+    assert(load_cartridge(cpu, std::move(rom), error, GameBoyModel::Cgb));
+    cpu.ppu = &ppu;
+    cpu.memory[0xFF40] = 0x00;
+    update_ppu(cpu, ppu, 4);
+
+    cpu_write(cpu, 0xFF51, 0x40); // From $4000
+    cpu_write(cpu, 0xFF52, 0x00);
+    cpu_write(cpu, 0xFF53, 0x01); // To $8100
+    cpu_write(cpu, 0xFF54, 0x00);
+    cpu_write(cpu, 0xFF55, 0x81); // Two blocks, one per HBlank
+    assert(cpu.memory[0x8100] == 0x01 && cpu.memory[0x810F] == 0x10);
+    assert(cpu.memory[0x8110] == 0x00);
+    assert(cpu_read(cpu, 0xFF55) == 0x00); // One block left
+}
+
 // The CGB has separate cartridge, WRAM, and VRAM buses, so OAM DMA only
 // blocks the bus it copies from; the DMG's cartridge and WRAM share one.
 static void test_oam_dma_bus_conflicts_by_model()
@@ -219,6 +246,11 @@ static void test_oam_dma_bus_conflicts_by_model()
         assert(cpu_read(cpu, 0x1234) == (cgb ? 0x5A : 0xFF)); // ROM
         assert(cpu_read(cpu, 0xC100) == 0xFF);               // WRAM, being copied from
         assert(cpu_read(cpu, 0xFE00) == 0xFF);               // OAM, being copied to
+        cpu_write(cpu, 0xFF06, 0x42);                        // I/O and IE are inside the CPU
+        assert(cpu_read(cpu, 0xFF06) == 0x42);
+        cpu_write(cpu, 0xFFFF, 0x15);
+        assert(cpu_read(cpu, 0xFFFF) == 0x15);
+        assert(cpu.oam_dma_active);
     }
 }
 
@@ -248,6 +280,7 @@ int main()
     test_cgb_banks_and_palettes();
     test_cgb_speed_switch_and_dma();
     test_cgb_registers_in_dmg_mode();
+    test_hblank_dma_started_in_mode_0();
     test_oam_dma_bus_conflicts_by_model();
     return 0;
 }

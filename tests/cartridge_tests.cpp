@@ -240,6 +240,7 @@ static void test_battery_ram_persistence()
     cpu_write(first_run, 0xA000, 0x42);
     cpu_write(first_run, 0xA123, 0x9A);
     assert(save_cartridge_ram(first_run, save_path, error));
+    assert(!std::filesystem::exists(save_path.string() + ".tmp")); // Written beside the save, then renamed
 
     CPU_LR35902 second_run{};
     assert(load_cartridge(second_run, make_mbc1_ram_rom(0x03), error));
@@ -416,6 +417,14 @@ static void test_mbc3_rtc_runs_during_stop()
     }
     latch_rtc(cpu);
     assert(read_latched_rtc(cpu, 0x08) == 1);
+
+    // Double speed doubles the CPU's cycles, but not the RTC's.
+    cpu.double_speed = true;
+    for (int cycle = 0; cycle < 2 * CYCLES_PER_SECOND; cycle += step_cpu(cpu))
+    {
+    }
+    latch_rtc(cpu);
+    assert(read_latched_rtc(cpu, 0x08) == 2);
 }
 
 // A cartridge whose first byte of each 16 KiB bank is the bank number.

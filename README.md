@@ -135,7 +135,7 @@ The window can be resized and scales the picture by whole numbers. `--scale N` s
 
 ### Save states
 
-F5 saves the whole machine state to a same-basename `.state` file beside the ROM, and F8 loads it back. A state only loads into the same build of the emulator running the same ROM. Loading a state also restores the cartridge RAM it was saved with, which is then written to the `.sav` file on exit as usual.
+F5 saves the whole machine state to a same-basename `.state` file beside the ROM, and F8 loads it back. A state only loads into a version of the emulator with the same save-state format, running the same ROM. Loading a state also restores the cartridge RAM it was saved with, which is then written to the `.sav` file on exit as usual.
 
 Show usage/help:
 

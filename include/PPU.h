@@ -70,7 +70,6 @@ struct PPU_State
     // dot longer and is coloured with the pixel behind it.
     struct PendingPixel
     {
-        bool valid;
         std::uint8_t delay;
         std::uint8_t x;
         std::uint8_t background_color;

@@ -5,6 +5,7 @@
 #include <ctime>
 #include <fstream>
 #include <iterator>
+#include <system_error>
 #include <utility>
 
 namespace
@@ -482,13 +483,6 @@ bool save_cartridge_ram(const CPU_LR35902 &cpu, const std::filesystem::path &pat
         return true;
     }
 
-    std::ofstream file(path, std::ios::binary | std::ios::trunc);
-    if (!file)
-    {
-        error = "Unable to create cartridge save: " + path.string();
-        return false;
-    }
-
     std::vector<uint8_t> save_data = cpu.cartridge_ram;
     if (cpu.cartridge_has_rtc)
     {
@@ -502,11 +496,27 @@ bool save_cartridge_ram(const CPU_LR35902 &cpu, const std::filesystem::path &pat
         }
         put_le(save_data, static_cast<uint64_t>(std::time(nullptr)), 8);
     }
+    // Write beside the save and rename, so a failed write keeps the old save.
+    std::filesystem::path temporary = path;
+    temporary += ".tmp";
+    std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+    if (!file)
+    {
+        error = "Unable to create cartridge save: " + temporary.string();
+        return false;
+    }
     file.write(reinterpret_cast<const char *>(save_data.data()), static_cast<std::streamsize>(save_data.size()));
     file.close();
     if (!file)
     {
-        error = "Unable to write cartridge save: " + path.string();
+        error = "Unable to write cartridge save: " + temporary.string();
+        return false;
+    }
+    std::error_code rename_error;
+    std::filesystem::rename(temporary, path, rename_error);
+    if (rename_error)
+    {
+        error = "Unable to replace cartridge save: " + path.string() + ": " + rename_error.message();
         return false;
     }
 

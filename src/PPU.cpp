@@ -122,6 +122,13 @@ namespace
         return shade_color(shade);
     }
 
+    // The colour of a blank screen: the DMG LCD's lightest shade, or white on
+    // the CGB.
+    std::uint32_t blank_color(const CPU_LR35902 &cpu)
+    {
+        return cpu.cgb_hardware ? 0xFFFFFFFF : shade_color(0);
+    }
+
     // OAM scan: the first ten objects overlapping this line, in OAM order.
     void scan_line_objects(const CPU_LR35902 &cpu, PPU_LR35902 &ppu, int line)
     {
@@ -383,7 +390,6 @@ namespace
 
         // Filled in place: building the pixel and copying it in costs more.
         PPU_LR35902::PendingPixel &pixel = ppu.pending_pixels[static_cast<std::size_t>(ppu.pending_count++)];
-        pixel.valid = true;
         pixel.delay = ppu.first_pixel_delayed ? 3 : 2;
         pixel.x = static_cast<std::uint8_t>(ppu.pixel_x);
         pixel.background_color = background_color;
@@ -534,6 +540,10 @@ namespace
             last = inserted;
             ++ppu.pending_count;
             ++ppu.pixel_x;
+            if (ppu.pixel_x >= PPU_LR35902::WIDTH)
+            {
+                return; // The insertion filled the line.
+            }
         }
 
         if (ppu.stall_dots == 0 && scrolling_done && ppu.background_count > 0 && (lcdc & 0x02) != 0)
@@ -658,7 +668,7 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
 {
     if (!ppu.framebuffer_initialized)
     {
-        std::fill(ppu.framebuffer.begin(), ppu.framebuffer.end(), shade_color(0));
+        std::fill(ppu.framebuffer.begin(), ppu.framebuffer.end(), blank_color(cpu));
         ppu.framebuffer_initialized = true;
     }
 
@@ -666,7 +676,7 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
     {
         if (ppu.lcd_enabled)
         {
-            std::fill(ppu.framebuffer.begin(), ppu.framebuffer.end(), shade_color(0));
+            std::fill(ppu.framebuffer.begin(), ppu.framebuffer.end(), blank_color(cpu));
         }
         ppu.lcd_enabled = false;
         ppu.on_line_153 = false;

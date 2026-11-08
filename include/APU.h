@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <vector>
 
-// DMG audio processing unit: two square channels (the first with a frequency
+// Audio processing unit: two square channels (the first with a frequency
 // sweep), a wave channel, and a noise channel, mixed to stereo samples.
 struct APU_LR35902
 {
@@ -77,5 +77,6 @@ void apu_tick(APU_LR35902 &apu, int cycles);
 // Produces output while the system clock is stopped by STOP: the channels hold
 // their levels, which the output filter decays to silence.
 void apu_tick_stopped(APU_LR35902 &apu, int cycles);
-// Clocks the frame sequencer; called when bit 4 of DIV falls.
+// Clocks the frame sequencer; called when bit 4 of DIV falls (bit 5 in double
+// speed).
 void apu_frame_sequencer_step(APU_LR35902 &apu);

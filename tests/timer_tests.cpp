@@ -140,6 +140,18 @@ static void test_reload_cycle_register_writes()
     assert(tma_cpu.memory[0xFF05] == 0x55);
 }
 
+static void test_stop_resets_divider()
+{
+    CPU_LR35902 cpu{};
+    cpu.memory[0x0000] = 0x10; // STOP
+    cpu.pc = 0x0000;
+    update_timers(cpu, 0x1234);
+    assert(cpu.memory[0xFF04] != 0);
+    execute_instruction(cpu);
+    assert(cpu.stopped);
+    assert(cpu.memory[0xFF04] == 0 && cpu.div_cycle_accumulator == 0);
+}
+
 int main()
 {
     test_timer_registers();
@@ -150,5 +162,6 @@ int main()
     test_tima_write_is_ignored_on_reload_cycle();
     test_tma_write_is_used_by_pending_reload();
     test_reload_cycle_register_writes();
+    test_stop_resets_divider();
     return 0;
 }

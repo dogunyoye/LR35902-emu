@@ -445,6 +445,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    SDL_SetMainReady(); // Built with SDL_MAIN_HANDLED, so main() is ours.
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) < 0)
     {
         std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;

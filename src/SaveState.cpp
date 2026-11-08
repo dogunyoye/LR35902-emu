@@ -9,12 +9,8 @@
 namespace
 {
     constexpr char MAGIC[8] = {'L', 'R', '3', '5', '9', '0', '2', 'S'};
-    // Bump whenever the saved fields or the PPU layout change.
-    constexpr uint32_t VERSION = 6;
-
-    static_assert(std::is_trivially_copyable_v<PPU_LR35902>, "PPU state is saved as raw bytes");
-    static_assert(std::is_trivially_copyable_v<APU_LR35902::Channel>, "APU channels are saved as raw bytes");
-    static_assert(std::is_trivially_copyable_v<MBC7_State>, "MBC7 state is saved as raw bytes");
+    // Bump whenever the saved fields change.
+    constexpr uint32_t VERSION = 7;
 
     class StateWriter
     {
@@ -53,8 +49,27 @@ namespace
                 ok = false;
                 return;
             }
-            std::memcpy(&value, data_.data() + position_, sizeof(T));
+            if constexpr (std::is_same_v<T, bool>)
+            {
+                // Any byte but 0 or 1 is not a bool.
+                const uint8_t byte = data_[position_];
+                ok = byte <= 1;
+                value = byte == 1;
+            }
+            else
+            {
+                std::memcpy(&value, data_.data() + position_, sizeof(T));
+            }
             position_ += sizeof(T);
+        }
+
+        template <std::size_t N>
+        void operator()(std::array<bool, N> &values)
+        {
+            for (bool &value : values)
+            {
+                (*this)(value);
+            }
         }
 
         // The size is fixed by the cartridge, so it must match.
@@ -108,7 +123,25 @@ namespace
     template <typename Archive>
     void transfer_apu(Archive &archive, APU_LR35902 &apu)
     {
-        archive(apu.channels);
+        for (APU_LR35902::Channel &channel : apu.channels)
+        {
+            archive(channel.enabled);
+            archive(channel.enabled_before_trigger);
+            archive(channel.dac_enabled);
+            archive(channel.length_enabled);
+            archive(channel.length);
+            archive(channel.timer);
+            archive(channel.frequency);
+            archive(channel.duty);
+            archive(channel.duty_step);
+            archive(channel.volume);
+            archive(channel.envelope_timer);
+            archive(channel.envelope_running);
+            archive(channel.wave_position);
+            archive(channel.wave_sample);
+            archive(channel.wave_read_cycles);
+            archive(channel.lfsr);
+        }
         archive(apu.cgb);
         archive(apu.registers);
         archive(apu.wave_ram);
@@ -181,7 +214,19 @@ namespace
         archive(cpu.mbc5_rom_bank);
         archive(cpu.mbc5_ram_bank);
         archive(cpu.mbc7_rom_bank);
-        archive(cpu.mbc7);
+        archive(cpu.mbc7.ram_enabled_2);
+        archive(cpu.mbc7.accel_x);
+        archive(cpu.mbc7.accel_y);
+        archive(cpu.mbc7.latch_reset);
+        archive(cpu.mbc7.cs);
+        archive(cpu.mbc7.clk);
+        archive(cpu.mbc7.di);
+        archive(cpu.mbc7.data_out);
+        archive(cpu.mbc7.write_enabled);
+        archive(cpu.mbc7.state);
+        archive(cpu.mbc7.address);
+        archive(cpu.mbc7.shift);
+        archive(cpu.mbc7.bits);
         archive(cpu.huc1_rom_bank);
         archive(cpu.huc1_ram_bank);
         archive(cpu.huc1_ir_mode);
@@ -210,6 +255,136 @@ namespace
         archive(cpu.hdma_hblank_active);
         archive(cpu.hdma_stall_cycles);
     }
+
+    // Keep in step with PPU_LR35902.
+    template <typename Archive>
+    void transfer_ppu(Archive &archive, PPU_LR35902 &ppu)
+    {
+        archive(ppu.cycles_into_line);
+        archive(ppu.mode3_end);
+        archive(ppu.ly_for_comparison);
+        archive(ppu.window_line);
+        archive(ppu.window_y_triggered);
+        for (PPU_LR35902::LineObject &object : ppu.line_objects)
+        {
+            archive(object.oam_index);
+            archive(object.x);
+            archive(object.y);
+            archive(object.fetched);
+        }
+        archive(ppu.line_object_count);
+        archive(ppu.fetch_step);
+        archive(ppu.fetch_tile_x);
+        archive(ppu.fetch_window);
+        archive(ppu.fetch_first_tile);
+        archive(ppu.fetch_tile_id);
+        archive(ppu.fetch_attributes);
+        archive(ppu.fetch_low);
+        archive(ppu.fetch_high);
+        archive(ppu.background_low);
+        archive(ppu.background_high);
+        archive(ppu.background_attributes);
+        archive(ppu.background_count);
+        archive(ppu.object_colors);
+        archive(ppu.object_attributes);
+        archive(ppu.object_oam_indices);
+        archive(ppu.pixel_x);
+        archive(ppu.invisible_pixels);
+        archive(ppu.discard_pixels);
+        for (PPU_LR35902::PendingPixel &pixel : ppu.pending_pixels)
+        {
+            archive(pixel.delay);
+            archive(pixel.x);
+            archive(pixel.background_color);
+            archive(pixel.object_color);
+            archive(pixel.object_attributes);
+            archive(pixel.background_attributes);
+        }
+        archive(ppu.pending_count);
+        archive(ppu.first_pixel_delayed);
+        archive(ppu.drawing);
+        archive(ppu.bgp_write_pending);
+        archive(ppu.bgp_write_blend);
+        archive(ppu.resolve_lcdc);
+        archive(ppu.stall_dots);
+        archive(ppu.stalled_object);
+        archive(ppu.window_active);
+        archive(ppu.window_drawn);
+        archive(ppu.window_index_late);
+        archive(ppu.window_start_x);
+        archive(ppu.penalised_tiles);
+        archive(ppu.mode);
+        archive(ppu.lcd_enabled);
+        archive(ppu.has_started);
+        archive(ppu.startup_mode0);
+        archive(ppu.line_start_hold);
+        archive(ppu.on_line_153);
+        archive(ppu.framebuffer_initialized);
+        archive(ppu.stat_interrupt_line);
+        archive(ppu.framebuffer);
+    }
+
+    // Values the emulator uses as indices or sizes, which a damaged state could
+    // otherwise push out of range. The cartridge type comes from the ROM, so it
+    // must match the one loaded.
+    bool state_in_range(const CPU_LR35902 &cpu, const PPU_LR35902 &ppu, const CPU_LR35902 &current)
+    {
+        const bool same_cartridge =
+            cpu.cartridge_mbc1 == current.cartridge_mbc1 &&
+            cpu.cartridge_mbc1_multicart == current.cartridge_mbc1_multicart &&
+            cpu.cartridge_mbc2 == current.cartridge_mbc2 && cpu.cartridge_mbc3 == current.cartridge_mbc3 &&
+            cpu.cartridge_has_rtc == current.cartridge_has_rtc && cpu.cartridge_mbc5 == current.cartridge_mbc5 &&
+            cpu.cartridge_mbc7 == current.cartridge_mbc7 && cpu.cartridge_huc1 == current.cartridge_huc1 &&
+            cpu.cartridge_battery_backed == current.cartridge_battery_backed;
+        if (!same_cartridge || (cpu.cgb_mode && !cpu.cgb_hardware) || cpu.vram_bank > 1 || cpu.wram_bank > 7 ||
+            cpu.oam_dma_index > 0xA0 || cpu.memory[0xFF44] > 153)
+        {
+            return false;
+        }
+        for (const APU_LR35902::Channel &channel : cpu.apu.channels)
+        {
+            if (channel.duty > 3 || channel.duty_step > 7 || channel.wave_position > 0x1F)
+            {
+                return false;
+            }
+        }
+
+        if (ppu.cycles_into_line < 0 || ppu.cycles_into_line >= 456 || ppu.line_object_count < 0 ||
+            ppu.line_object_count > static_cast<int>(ppu.line_objects.size()) || ppu.pending_count < 0 ||
+            ppu.pending_count >= static_cast<int>(ppu.pending_pixels.size()) || ppu.pixel_x < 0 ||
+            ppu.pixel_x > PPU_LR35902::WIDTH || ppu.stalled_object < -1 ||
+            ppu.stalled_object >= ppu.line_object_count || (ppu.stall_dots > 0 && ppu.stalled_object < 0) ||
+            (ppu.drawing && cpu.memory[0xFF44] >= PPU_LR35902::HEIGHT))
+        {
+            return false;
+        }
+        for (int index = 0; index < ppu.line_object_count; ++index)
+        {
+            // Objects are fetched on the line the OAM scan found them on.
+            const PPU_LR35902::LineObject &object = ppu.line_objects[static_cast<std::size_t>(index)];
+            const int row = cpu.memory[0xFF44] - (object.y - 16);
+            if (object.oam_index >= 40 || (ppu.drawing && (row < 0 || row >= 16)))
+            {
+                return false;
+            }
+        }
+        for (const std::uint8_t color : ppu.object_colors)
+        {
+            if (color > 3)
+            {
+                return false;
+            }
+        }
+        for (int index = 0; index < ppu.pending_count; ++index)
+        {
+            const PPU_LR35902::PendingPixel &pixel = ppu.pending_pixels[static_cast<std::size_t>(index)];
+            if (pixel.x >= PPU_LR35902::WIDTH || pixel.background_color > 3 || pixel.object_color > 3)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
 }
 
 std::vector<uint8_t> serialize_state(const CPU_LR35902 &cpu, const PPU_LR35902 &ppu)
@@ -222,11 +397,9 @@ std::vector<uint8_t> serialize_state(const CPU_LR35902 &cpu, const PPU_LR35902 &
     writer(version);
     uint64_t hash = rom_hash(cpu);
     writer(hash);
-    uint32_t ppu_size = sizeof(PPU_LR35902);
-    writer(ppu_size);
     // The writer only reads, so the casts leave the machine unchanged.
     transfer_cpu(writer, const_cast<CPU_LR35902 &>(cpu));
-    writer(const_cast<PPU_LR35902 &>(ppu));
+    transfer_ppu(writer, const_cast<PPU_LR35902 &>(ppu));
     return std::move(writer.data);
 }
 
@@ -236,17 +409,15 @@ bool deserialize_state(CPU_LR35902 &cpu, PPU_LR35902 &ppu, const std::vector<uin
     char magic[sizeof(MAGIC)] = {};
     uint32_t version = 0;
     uint64_t hash = 0;
-    uint32_t ppu_size = 0;
     reader(magic);
     reader(version);
     reader(hash);
-    reader(ppu_size);
     if (!reader.ok || std::memcmp(magic, MAGIC, sizeof(MAGIC)) != 0)
     {
         error = "not a save state.";
         return false;
     }
-    if (version != VERSION || ppu_size != sizeof(PPU_LR35902))
+    if (version != VERSION)
     {
         error = "the save state is from a different version of the emulator.";
         return false;
@@ -263,8 +434,8 @@ bool deserialize_state(CPU_LR35902 &cpu, PPU_LR35902 &ppu, const std::vector<uin
     CPU_LR35902 loaded_cpu = cpu;
     PPU_LR35902 loaded_ppu = ppu;
     transfer_cpu(reader, loaded_cpu);
-    reader(loaded_ppu);
-    if (!reader.ok || !reader.at_end())
+    transfer_ppu(reader, loaded_ppu);
+    if (!reader.ok || !reader.at_end() || !state_in_range(loaded_cpu, loaded_ppu, cpu))
     {
         cpu.cartridge_rom = std::move(rom);
         error = "the save state is damaged.";
@@ -290,6 +461,7 @@ bool save_state_file(const CPU_LR35902 &cpu, const PPU_LR35902 &ppu, const std::
     {
         std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
         file.write(reinterpret_cast<const char *>(state.data()), static_cast<std::streamsize>(state.size()));
+        file.close(); // Flushes, so a failed final write is caught here.
         if (!file)
         {
             error = "could not write " + temporary.string() + ".";

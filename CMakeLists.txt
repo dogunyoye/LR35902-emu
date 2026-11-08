@@ -63,10 +63,14 @@ find_package(SDL2 REQUIRED)
 add_emulator_test(controls_tests tests/controls_tests.cpp)
 target_sources(controls_tests PRIVATE src/Controls.cpp)
 target_link_libraries(controls_tests PRIVATE SDL2::SDL2)
+# Keep our own main() rather than SDL's renaming it to SDL_main on Windows,
+# which would need SDL2main.
+target_compile_definitions(controls_tests PRIVATE SDL_MAIN_HANDLED)
 
 # Placeholder executable target — add main.cpp under src/ to enable.
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
     add_executable(lr35902-emu src/main.cpp src/Controls.cpp)
     target_include_directories(lr35902-emu PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(lr35902-emu PRIVATE lr35902 lr35902_warnings SDL2::SDL2)
+    target_compile_definitions(lr35902-emu PRIVATE SDL_MAIN_HANDLED)
 endif()
