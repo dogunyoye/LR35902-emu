@@ -21,6 +21,7 @@ namespace
         0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
     };
     constexpr std::size_t MBC2_RAM_SIZE = 0x0200;
+    constexpr std::size_t MBC7_EEPROM_SIZE = 256;
     constexpr uint32_t CYCLES_PER_SECOND = 4194304;
     // Clock state appended to the RAM in battery saves, in the layout BGB and
     // VBA-M use: five 32-bit live registers, five latched, a 64-bit Unix time.
@@ -178,9 +179,11 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     const bool mbc2 = cartridge_type == 0x05 || cartridge_type == 0x06;
     const bool mbc3 = cartridge_type >= 0x0F && cartridge_type <= 0x13;
     const bool mbc5 = cartridge_type >= 0x19 && cartridge_type <= 0x1E;
-    if (!rom_only && !mbc1 && !mbc2 && !mbc3 && !mbc5)
+    const bool mbc7 = cartridge_type == 0x22;
+    const bool huc1 = cartridge_type == 0xFF;
+    if (!rom_only && !mbc1 && !mbc2 && !mbc3 && !mbc5 && !mbc7 && !huc1)
     {
-        error = "Unsupported cartridge type; supported types are ROM ONLY, MBC1, MBC2, MBC3, and MBC5.";
+        error = "Unsupported cartridge type; supported types are ROM ONLY, MBC1, MBC2, MBC3, MBC5, MBC7, and HuC1.";
         return false;
     }
 
@@ -214,7 +217,11 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     {
         ram_size = MBC2_RAM_SIZE; // Built-in 512x4-bit RAM; the header RAM size is unused.
     }
-    else if (mbc1 || mbc3 || mbc5)
+    else if (mbc7)
+    {
+        ram_size = MBC7_EEPROM_SIZE; // The header declares no RAM; saves live in the EEPROM.
+    }
+    else if (mbc1 || mbc3 || mbc5 || huc1)
     {
         const uint8_t ram_size_code = rom[RAM_SIZE_ADDRESS];
         if ((mbc1 && cartridge_type == 0x01) || cartridge_type == 0x0F || cartridge_type == 0x11)
@@ -247,9 +254,12 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     cpu.cartridge_mbc3 = mbc3;
     cpu.cartridge_has_rtc = cartridge_type == 0x0F || cartridge_type == 0x10;
     cpu.cartridge_mbc5 = mbc5;
+    cpu.cartridge_mbc7 = mbc7;
+    cpu.cartridge_huc1 = huc1;
+    cpu.cart_ram_enabled = huc1; // HuC1 RAM needs no enabling.
     cpu.cartridge_battery_backed = cartridge_type == 0x03 || cartridge_type == 0x06 || cartridge_type == 0x0F ||
                                    cartridge_type == 0x10 || cartridge_type == 0x13 ||
-                                   cartridge_type == 0x1B || cartridge_type == 0x1E;
+                                   cartridge_type == 0x1B || cartridge_type == 0x1E || mbc7 || huc1;
     cpu.cartridge_ram.assign(ram_size, 0xFF);
     cpu.af.reg16 = 0x01B0;
     cpu.bc.reg16 = 0x0013;

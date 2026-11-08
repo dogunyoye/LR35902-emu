@@ -1,6 +1,8 @@
 #include "LR35902.h"
 #include "PPU.h"
 
+#include <algorithm>
+
 // Important Game Boy Memory Ranges
 const uint16_t VRAM_START = 0x8000;
 const uint16_t VRAM_END = 0x9FFF;
@@ -46,6 +48,14 @@ namespace
         {
             bank = cpu.mbc5_rom_bank;
         }
+        else if (cpu.cartridge_mbc7)
+        {
+            bank = cpu.mbc7_rom_bank;
+        }
+        else if (cpu.cartridge_huc1)
+        {
+            bank = cpu.huc1_rom_bank;
+        }
         else if (cpu.cartridge_mbc2)
         {
             bank = cpu.mbc2_rom_bank;
@@ -79,11 +89,223 @@ namespace
         {
             bank = cpu.mbc5_ram_bank;
         }
+        else if (cpu.cartridge_huc1)
+        {
+            bank = cpu.huc1_ram_bank;
+        }
         else if (cpu.cartridge_mbc3)
         {
             bank = cpu.mbc3_ram_select & 0x03;
         }
         return (bank * 0x2000 + (address - 0xA000)) % cpu.cartridge_ram.size();
+    }
+
+    // MBC7 EEPROM: 128 16-bit words, high byte first in cartridge RAM.
+    uint16_t mbc7_eeprom_word(const CPU_LR35902 &cpu, uint8_t address)
+    {
+        const std::size_t index = static_cast<std::size_t>(address & 0x7F) * 2;
+        return static_cast<uint16_t>((cpu.cartridge_ram[index] << 8) | cpu.cartridge_ram[index + 1]);
+    }
+
+    void set_mbc7_eeprom_word(CPU_LR35902 &cpu, uint8_t address, uint16_t value)
+    {
+        const std::size_t index = static_cast<std::size_t>(address & 0x7F) * 2;
+        cpu.cartridge_ram[index] = static_cast<uint8_t>(value >> 8);
+        cpu.cartridge_ram[index + 1] = static_cast<uint8_t>(value);
+    }
+
+    enum Mbc7EepromState : uint8_t
+    {
+        EEPROM_IDLE,     // Waiting for a start bit.
+        EEPROM_COMMAND,  // Shifting in the opcode and address.
+        EEPROM_READ,     // Shifting words out.
+        EEPROM_WRITE,    // Shifting in a word to write.
+        EEPROM_WRITE_ALL, // Shifting in a word to write everywhere.
+        EEPROM_DONE       // Waiting for chip select to drop.
+    };
+
+    // Runs a command once its 2-bit opcode and 8-bit address are shifted in.
+    void run_mbc7_eeprom_command(CPU_LR35902 &cpu)
+    {
+        MBC7_State &mbc7 = cpu.mbc7;
+        const uint8_t opcode = static_cast<uint8_t>((mbc7.shift >> 8) & 0x03);
+        const uint8_t address = static_cast<uint8_t>(mbc7.shift);
+        mbc7.address = address & 0x7F;
+        mbc7.shift = 0;
+        mbc7.bits = 0;
+        mbc7.state = EEPROM_DONE;
+        mbc7.data_out = true;
+        switch (opcode)
+        {
+        case 0x02: // READ: a dummy 0, then the word, most significant bit first
+            mbc7.shift = mbc7_eeprom_word(cpu, mbc7.address);
+            mbc7.data_out = false;
+            mbc7.state = EEPROM_READ;
+            break;
+        case 0x01: // WRITE
+            mbc7.state = EEPROM_WRITE;
+            break;
+        case 0x03: // ERASE
+            if (mbc7.write_enabled)
+            {
+                set_mbc7_eeprom_word(cpu, mbc7.address, 0xFFFF);
+            }
+            break;
+        default:
+            switch ((address >> 6) & 0x03) // Opcode 00 takes its command from the address.
+            {
+            case 0x00: // EWDS
+                mbc7.write_enabled = false;
+                break;
+            case 0x01: // WRAL
+                mbc7.state = EEPROM_WRITE_ALL;
+                break;
+            case 0x02: // ERAL
+                if (mbc7.write_enabled)
+                {
+                    std::fill(cpu.cartridge_ram.begin(), cpu.cartridge_ram.end(), 0xFF);
+                }
+                break;
+            default: // EWEN
+                mbc7.write_enabled = true;
+                break;
+            }
+            break;
+        }
+    }
+
+    // Bit 7 is chip select, bit 6 the clock, and bit 1 data in. Data is
+    // sampled and shifted out on rising clock edges while selected.
+    void write_mbc7_eeprom(CPU_LR35902 &cpu, uint8_t value)
+    {
+        MBC7_State &mbc7 = cpu.mbc7;
+        const bool cs = (value & 0x80) != 0;
+        const bool clk = (value & 0x40) != 0;
+        const bool di = (value & 0x02) != 0;
+        if (!cs || !mbc7.cs)
+        {
+            mbc7.state = EEPROM_IDLE; // Selecting or deselecting the chip resets it.
+            mbc7.bits = 0;
+            mbc7.data_out = true;
+        }
+        else if (clk && !mbc7.clk)
+        {
+            switch (mbc7.state)
+            {
+            case EEPROM_IDLE:
+                if (di)
+                {
+                    mbc7.state = EEPROM_COMMAND;
+                    mbc7.shift = 0;
+                    mbc7.bits = 0;
+                }
+                break;
+            case EEPROM_COMMAND:
+                mbc7.shift = static_cast<uint16_t>((mbc7.shift << 1) | di);
+                if (++mbc7.bits == 10)
+                {
+                    run_mbc7_eeprom_command(cpu);
+                }
+                break;
+            case EEPROM_READ:
+                mbc7.data_out = (mbc7.shift & 0x8000) != 0;
+                mbc7.shift = static_cast<uint16_t>(mbc7.shift << 1);
+                if (++mbc7.bits == 16)
+                {
+                    // Reads continue into the next word.
+                    mbc7.address = static_cast<uint8_t>((mbc7.address + 1) & 0x7F);
+                    mbc7.shift = mbc7_eeprom_word(cpu, mbc7.address);
+                    mbc7.bits = 0;
+                }
+                break;
+            case EEPROM_WRITE:
+            case EEPROM_WRITE_ALL:
+                mbc7.shift = static_cast<uint16_t>((mbc7.shift << 1) | di);
+                if (++mbc7.bits == 16)
+                {
+                    if (mbc7.write_enabled)
+                    {
+                        for (int address = 0; address < 0x80; ++address)
+                        {
+                            if (mbc7.state == EEPROM_WRITE_ALL || address == mbc7.address)
+                            {
+                                set_mbc7_eeprom_word(cpu, static_cast<uint8_t>(address), mbc7.shift);
+                            }
+                        }
+                    }
+                    mbc7.state = EEPROM_DONE;
+                    mbc7.data_out = true; // Ready
+                }
+                break;
+            default:
+                break;
+            }
+        }
+        mbc7.cs = cs;
+        mbc7.clk = clk;
+        mbc7.di = di;
+    }
+
+    // $A000-$AFFF, with address bits 4-7 selecting the register.
+    uint8_t read_mbc7_register(const CPU_LR35902 &cpu, uint16_t address)
+    {
+        const MBC7_State &mbc7 = cpu.mbc7;
+        if (!cpu.cart_ram_enabled || !mbc7.ram_enabled_2 || address >= 0xB000)
+        {
+            return 0xFF;
+        }
+        switch ((address >> 4) & 0x0F)
+        {
+        case 0x2:
+            return static_cast<uint8_t>(mbc7.accel_x);
+        case 0x3:
+            return static_cast<uint8_t>(mbc7.accel_x >> 8);
+        case 0x4:
+            return static_cast<uint8_t>(mbc7.accel_y);
+        case 0x5:
+            return static_cast<uint8_t>(mbc7.accel_y >> 8);
+        case 0x6:
+            return 0x00;
+        case 0x8:
+            return static_cast<uint8_t>((mbc7.cs ? 0x80 : 0) | (mbc7.clk ? 0x40 : 0) | (mbc7.di ? 0x02 : 0) |
+                                        (mbc7.data_out ? 0x01 : 0));
+        default:
+            return 0xFF;
+        }
+    }
+
+    void write_mbc7_register(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
+    {
+        MBC7_State &mbc7 = cpu.mbc7;
+        if (!cpu.cart_ram_enabled || !mbc7.ram_enabled_2 || address >= 0xB000)
+        {
+            return;
+        }
+        switch ((address >> 4) & 0x0F)
+        {
+        case 0x0:
+            if (value == 0x55)
+            {
+                mbc7.accel_x = 0x8000;
+                mbc7.accel_y = 0x8000;
+                mbc7.latch_reset = true;
+            }
+            break;
+        case 0x1:
+            if (value == 0xAA && mbc7.latch_reset)
+            {
+                // About $70 either side of level is one g of tilt.
+                mbc7.accel_x = static_cast<uint16_t>(0x81D0 + cpu.mbc7_tilt_x * 0x70);
+                mbc7.accel_y = static_cast<uint16_t>(0x81D0 + cpu.mbc7_tilt_y * 0x70);
+                mbc7.latch_reset = false;
+            }
+            break;
+        case 0x8:
+            write_mbc7_eeprom(cpu, value);
+            break;
+        default:
+            break;
+        }
     }
 
     uint8_t joypad_lines(const CPU_LR35902 &cpu)
@@ -132,7 +354,16 @@ namespace
         {
             return cpu.cartridge_has_rtc && cpu.mbc3_ram_select <= 0x0C ? read_cartridge_rtc(cpu) : 0xFF;
         }
-        if ((!cpu.cartridge_mbc1 && !cpu.cartridge_mbc2 && !cpu.cartridge_mbc3 && !cpu.cartridge_mbc5) ||
+        if (cpu.cartridge_mbc7)
+        {
+            return read_mbc7_register(cpu, address);
+        }
+        if (cpu.cartridge_huc1 && cpu.huc1_ir_mode)
+        {
+            return 0xC0; // No infrared light received.
+        }
+        if ((!cpu.cartridge_mbc1 && !cpu.cartridge_mbc2 && !cpu.cartridge_mbc3 && !cpu.cartridge_mbc5 &&
+             !cpu.cartridge_huc1) ||
             !cpu.cart_ram_enabled || cpu.cartridge_ram.empty() || (cpu.cartridge_mbc3 && cpu.mbc3_ram_select > 0x03))
         {
             return 0xFF;
@@ -473,6 +704,46 @@ namespace
                         cpu.mbc5_ram_bank = value & 0x0F;
                     }
                 }
+                else if (cpu.cartridge_mbc7)
+                {
+                    if (address < 0x2000)
+                    {
+                        cpu.cart_ram_enabled = (value & 0x0F) == 0x0A;
+                    }
+                    else if (address < 0x4000)
+                    {
+                        cpu.mbc7_rom_bank = value & 0x7F;
+                        if (cpu.mbc7_rom_bank == 0)
+                        {
+                            cpu.mbc7_rom_bank = 1;
+                        }
+                    }
+                    else if (address < 0x6000)
+                    {
+                        cpu.mbc7.ram_enabled_2 = value == 0x40; // Needed as well as the usual $0A.
+                    }
+                }
+                else if (cpu.cartridge_huc1)
+                {
+                    if (address < 0x2000)
+                    {
+                        // $0E switches $A000-$BFFF to the infrared port; anything else to RAM.
+                        cpu.huc1_ir_mode = value == 0x0E;
+                        cpu.cart_ram_enabled = !cpu.huc1_ir_mode;
+                    }
+                    else if (address < 0x4000)
+                    {
+                        cpu.huc1_rom_bank = value & 0x3F;
+                        if (cpu.huc1_rom_bank == 0)
+                        {
+                            cpu.huc1_rom_bank = 1;
+                        }
+                    }
+                    else if (address < 0x6000)
+                    {
+                        cpu.huc1_ram_bank = value & 0x03;
+                    }
+                }
                 else if (cpu.cartridge_mbc3)
                 {
                     if (address < 0x2000)
@@ -561,7 +832,17 @@ namespace
                 }
                 return;
             }
-            if ((cpu.cartridge_mbc1 || cpu.cartridge_mbc2 || cpu.cartridge_mbc3 || cpu.cartridge_mbc5) &&
+            if (cpu.cartridge_mbc7)
+            {
+                write_mbc7_register(cpu, address, value);
+                return;
+            }
+            if (cpu.cartridge_huc1 && cpu.huc1_ir_mode)
+            {
+                return; // The infrared LED.
+            }
+            if ((cpu.cartridge_mbc1 || cpu.cartridge_mbc2 || cpu.cartridge_mbc3 || cpu.cartridge_mbc5 ||
+                 cpu.cartridge_huc1) &&
                 cpu.cart_ram_enabled && !cpu.cartridge_ram.empty() &&
                 !(cpu.cartridge_mbc3 && cpu.mbc3_ram_select > 0x03))
             {

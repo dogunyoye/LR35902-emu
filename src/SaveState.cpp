@@ -10,10 +10,11 @@ namespace
 {
     constexpr char MAGIC[8] = {'L', 'R', '3', '5', '9', '0', '2', 'S'};
     // Bump whenever the saved fields or the PPU layout change.
-    constexpr uint32_t VERSION = 1;
+    constexpr uint32_t VERSION = 2;
 
     static_assert(std::is_trivially_copyable_v<PPU_LR35902>, "PPU state is saved as raw bytes");
     static_assert(std::is_trivially_copyable_v<APU_LR35902::Channel>, "APU channels are saved as raw bytes");
+    static_assert(std::is_trivially_copyable_v<MBC7_State>, "MBC7 state is saved as raw bytes");
 
     class StateWriter
     {
@@ -125,8 +126,8 @@ namespace
     }
 
     // Keep in step with CPU_LR35902. The ROM itself is not saved, and the PPU
-    // pointer, bus bookkeeping, serial test output, and the buttons currently
-    // held are left alone.
+    // pointer, bus bookkeeping, serial test output, and the buttons and tilt
+    // currently held are left alone.
     template <typename Archive>
     void transfer_cpu(Archive &archive, CPU_LR35902 &cpu)
     {
@@ -163,6 +164,8 @@ namespace
         archive(cpu.cartridge_mbc3);
         archive(cpu.cartridge_has_rtc);
         archive(cpu.cartridge_mbc5);
+        archive(cpu.cartridge_mbc7);
+        archive(cpu.cartridge_huc1);
         archive(cpu.cartridge_battery_backed);
         archive(cpu.mbc1_rom_bank_low);
         archive(cpu.mbc1_bank_high);
@@ -176,6 +179,11 @@ namespace
         archive(cpu.rtc_cycles);
         archive(cpu.mbc5_rom_bank);
         archive(cpu.mbc5_ram_bank);
+        archive(cpu.mbc7_rom_bank);
+        archive(cpu.mbc7);
+        archive(cpu.huc1_rom_bank);
+        archive(cpu.huc1_ram_bank);
+        archive(cpu.huc1_ir_mode);
         archive(cpu.vram_locked);
         archive(cpu.oam_locked);
         archive.bytes(cpu.cartridge_ram);

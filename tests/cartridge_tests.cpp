@@ -418,6 +418,123 @@ static void test_mbc3_rtc_runs_during_stop()
     assert(read_latched_rtc(cpu, 0x08) == 1);
 }
 
+// A cartridge whose first byte of each 16 KiB bank is the bank number.
+static std::vector<uint8_t> make_banked_rom(uint8_t cartridge_type, uint8_t rom_size_code, uint8_t ram_size_code)
+{
+    std::vector<uint8_t> rom(static_cast<std::size_t>(0x8000) << rom_size_code, 0);
+    for (std::size_t bank = 0; bank < rom.size() / 0x4000; ++bank)
+    {
+        rom[bank * 0x4000] = static_cast<uint8_t>(bank);
+    }
+    rom[0x0147] = cartridge_type;
+    rom[0x0148] = rom_size_code;
+    rom[0x0149] = ram_size_code;
+    return rom;
+}
+
+static void test_huc1_banking_ram_and_infrared()
+{
+    std::string error;
+    CPU_LR35902 cpu{};
+    assert(load_cartridge(cpu, make_banked_rom(0xFF, 0x05, 0x03), error)); // 1 MiB ROM, 32 KiB RAM
+    assert(cpu.cartridge_battery_backed);
+
+    cpu_write(cpu, 0x2000, 0x25);
+    assert(cpu_read(cpu, 0x4000) == 0x25);
+    cpu_write(cpu, 0x2000, 0x00);
+    assert(cpu_read(cpu, 0x4000) == 0x01); // Bank 0 maps to bank 1
+
+    cpu_write(cpu, 0xA000, 0x11); // RAM is usable without enabling it
+    cpu_write(cpu, 0x4000, 0x02);
+    cpu_write(cpu, 0xA000, 0x22);
+    assert(cpu_read(cpu, 0xA000) == 0x22);
+    cpu_write(cpu, 0x4000, 0x00);
+    assert(cpu_read(cpu, 0xA000) == 0x11);
+
+    cpu_write(cpu, 0x0000, 0x0E); // Infrared port
+    assert(cpu_read(cpu, 0xA000) == 0xC0);
+    cpu_write(cpu, 0xA000, 0x01);
+    cpu_write(cpu, 0x0000, 0x00);
+    assert(cpu_read(cpu, 0xA000) == 0x11);
+}
+
+// Clocks one bit into the MBC7 EEPROM with chip select high and returns DO.
+static bool clock_mbc7_eeprom(CPU_LR35902 &cpu, bool bit)
+{
+    const uint8_t data = bit ? 0x02 : 0x00;
+    cpu_write(cpu, 0xA080, static_cast<uint8_t>(0x80 | data));
+    cpu_write(cpu, 0xA080, static_cast<uint8_t>(0xC0 | data));
+    return (cpu_read(cpu, 0xA080) & 0x01) != 0;
+}
+
+static void send_mbc7_command(CPU_LR35902 &cpu, uint8_t opcode, uint8_t address)
+{
+    cpu_write(cpu, 0xA080, 0x00);
+    cpu_write(cpu, 0xA080, 0x80); // Select the chip
+    clock_mbc7_eeprom(cpu, true); // Start bit
+    for (int bit = 1; bit >= 0; --bit)
+    {
+        clock_mbc7_eeprom(cpu, ((opcode >> bit) & 1) != 0);
+    }
+    for (int bit = 7; bit >= 0; --bit)
+    {
+        clock_mbc7_eeprom(cpu, ((address >> bit) & 1) != 0);
+    }
+}
+
+static void test_mbc7_eeprom_and_accelerometer()
+{
+    std::string error;
+    CPU_LR35902 cpu{};
+    assert(load_cartridge(cpu, make_banked_rom(0x22, 0x04, 0x00), error)); // 512 KiB ROM
+    assert(cpu.cartridge_battery_backed);
+    assert(cpu.cartridge_ram.size() == 256);
+
+    cpu_write(cpu, 0x2000, 0x1F);
+    assert(cpu_read(cpu, 0x4000) == 0x1F);
+
+    assert(cpu_read(cpu, 0xA020) == 0xFF); // Registers need both enables
+    cpu_write(cpu, 0x0000, 0x0A);
+    assert(cpu_read(cpu, 0xA020) == 0xFF);
+    cpu_write(cpu, 0x4000, 0x40);
+
+    cpu.mbc7_tilt_x = 1;
+    cpu.mbc7_tilt_y = -1;
+    cpu_write(cpu, 0xA000, 0x55);
+    assert(cpu_read(cpu, 0xA020) == 0x00 && cpu_read(cpu, 0xA030) == 0x80);
+    cpu_write(cpu, 0xA010, 0xAA);
+    assert(((cpu_read(cpu, 0xA030) << 8) | cpu_read(cpu, 0xA020)) == 0x81D0 + 0x70);
+    assert(((cpu_read(cpu, 0xA050) << 8) | cpu_read(cpu, 0xA040)) == 0x81D0 - 0x70);
+
+    // Writes are ignored until enabled with EWEN.
+    send_mbc7_command(cpu, 0x01, 0x05);
+    for (int bit = 15; bit >= 0; --bit)
+    {
+        clock_mbc7_eeprom(cpu, ((0x1234 >> bit) & 1) != 0);
+    }
+    assert(cpu.cartridge_ram[10] == 0xFF);
+
+    send_mbc7_command(cpu, 0x00, 0xC0); // EWEN
+    send_mbc7_command(cpu, 0x01, 0x05); // WRITE word 5
+    for (int bit = 15; bit >= 0; --bit)
+    {
+        clock_mbc7_eeprom(cpu, ((0xBEEF >> bit) & 1) != 0);
+    }
+    assert(cpu.cartridge_ram[10] == 0xBE && cpu.cartridge_ram[11] == 0xEF);
+
+    send_mbc7_command(cpu, 0x02, 0x05); // READ word 5
+    assert((cpu_read(cpu, 0xA080) & 0x01) == 0); // Dummy zero bit
+    uint16_t word = 0;
+    for (int bit = 0; bit < 16; ++bit)
+    {
+        word = static_cast<uint16_t>((word << 1) | (clock_mbc7_eeprom(cpu, false) ? 1 : 0));
+    }
+    assert(word == 0xBEEF);
+
+    send_mbc7_command(cpu, 0x03, 0x05); // ERASE word 5
+    assert(cpu.cartridge_ram[10] == 0xFF && cpu.cartridge_ram[11] == 0xFF);
+}
+
 int main()
 {
     test_rom_only_cartridge();
@@ -431,5 +548,7 @@ int main()
     test_mbc3_rtc();
     test_mbc3_rtc_runs_during_stop();
     test_mbc3_rtc_persistence();
+    test_huc1_banking_ram_and_infrared();
+    test_mbc7_eeprom_and_accelerometer();
     return 0;
 }

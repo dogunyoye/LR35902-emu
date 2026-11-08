@@ -11,7 +11,7 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | CPU register model (AF/BC/DE/HL, SP, PC, IME) | :white_check_mark: done |
 | 64 KB flat memory space + read/write routing | :white_check_mark: done |
 | WRAM echo (0xE000–0xFDFF) | :white_check_mark: done |
-| ROM-only, MBC1 (including multicarts), MBC2, MBC3 with real-time clock, and MBC5 cartridges (banked ROM/RAM, battery saves) | :white_check_mark: done |
+| ROM-only, MBC1 (including multicarts), MBC2, MBC3 with real-time clock, MBC5, MBC7 (accelerometer and EEPROM), and HuC1 cartridges (banked ROM/RAM, battery saves) | :white_check_mark: done |
 | VRAM/OAM access locking during PPU modes | :white_check_mark: done |
 | Legal base and CB-prefixed opcode coverage, including STOP | :white_check_mark: done |
 | Timer registers (DIV/TIMA/TMA/TAC) and update logic | :white_check_mark: done |
@@ -24,8 +24,10 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | Sound: two square channels (one with sweep), wave and noise channels, stereo mixing to SDL audio | :white_check_mark: done |
 | Regression tests for CPU, timer, serial, interrupts, joypad, cartridge, memory, and PPU behavior | :white_check_mark: done |
 | CLI runner with cycle-driven cartridge support and keyboard controls | :white_check_mark: done |
-| Sub-M-cycle peripheral conformance (OAM corruption bug, DMA bus conflicts) | :soon: planned |
-| Other mappers (MBC6, MBC7, HuC1, HuC3, etc.) | :soon: planned |
+| Save states and fast-forward | :white_check_mark: done |
+| DMG OAM corruption bug | :white_check_mark: done |
+| Sub-M-cycle peripheral conformance (DMA bus conflicts) | :soon: planned |
+| Other mappers (MBC6, HuC3, etc.) | :soon: planned |
 | Full PPU and hardware fidelity | :soon: planned |
 
 ## Building
@@ -86,7 +88,7 @@ Run the demo program:
 ./build/lr35902-emu
 ```
 
-Run a supported ROM-only (32 KiB), MBC1, MBC2, MBC3, or MBC5 cartridge image:
+Run a supported ROM-only (32 KiB), MBC1, MBC2, MBC3, MBC5, MBC7, or HuC1 cartridge image:
 
 ```sh
 ./build/lr35902-emu /path/to/game.gb
@@ -94,7 +96,7 @@ Run a supported ROM-only (32 KiB), MBC1, MBC2, MBC3, or MBC5 cartridge image:
 
 Battery-backed cartridge RAM is loaded from and saved to a same-basename `.sav` file beside the ROM. MBC3 saves also store the real-time clock in the format BGB and VBA-M use, and the clock catches up on time that passed while the emulator was closed.
 
-Controls: arrow keys move, Z is A, X is B, Right Shift is Select, and Enter is Start. Hold Tab to fast-forward at four times normal speed (sound is muted meanwhile).
+Controls: arrow keys move, Z is A, X is B, Right Shift is Select, and Enter is Start. Hold Tab to fast-forward at four times normal speed (sound is muted meanwhile). On MBC7 cartridges, which have a tilt sensor, I and K tilt up and down and J and L tilt left and right.
 
 F5 saves the whole machine state to a same-basename `.state` file beside the ROM, and F8 loads it back. A state only loads into the same build of the emulator running the same ROM. Loading a state also restores the cartridge RAM it was saved with, which is then written to the `.sav` file on exit as usual.
 

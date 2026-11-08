@@ -9,6 +9,27 @@
 
 struct PPU_LR35902;
 
+// MBC7 cartridge peripherals: a two-axis accelerometer and a 93LC56 serial
+// EEPROM (128 16-bit words, stored in cartridge_ram).
+struct MBC7_State
+{
+    bool ram_enabled_2 = false;
+    // Accelerometer readings, latched by writing $55 then $AA. $81D0 is level.
+    uint16_t accel_x = 0x8000;
+    uint16_t accel_y = 0x8000;
+    bool latch_reset = false;
+    // EEPROM pins as last written, and the command being shifted in or out.
+    bool cs = false;
+    bool clk = false;
+    bool di = false;
+    bool data_out = true;
+    bool write_enabled = false;
+    uint8_t state = 0;
+    uint8_t address = 0;
+    uint16_t shift = 0;
+    int bits = 0;
+};
+
 union RegPair
 {
     uint16_t reg16;
@@ -67,6 +88,8 @@ struct CPU_LR35902
     bool cartridge_mbc3 = false;
     bool cartridge_has_rtc = false;
     bool cartridge_mbc5 = false;
+    bool cartridge_mbc7 = false;
+    bool cartridge_huc1 = false;
     bool cartridge_battery_backed = false;
     uint8_t mbc1_rom_bank_low = 1;
     uint8_t mbc1_bank_high = 0;
@@ -84,6 +107,15 @@ struct CPU_LR35902
     uint32_t rtc_cycles = 0;
     uint16_t mbc5_rom_bank = 1;
     uint8_t mbc5_ram_bank = 0;
+    uint8_t mbc7_rom_bank = 1;
+    MBC7_State mbc7{};
+    // Tilt from the host's controls, -1 to 1 on each axis; not machine state.
+    int mbc7_tilt_x = 0;
+    int mbc7_tilt_y = 0;
+    // HuC1: ROM and RAM banks, and whether $A000-$BFFF is the infrared port.
+    uint8_t huc1_rom_bank = 1;
+    uint8_t huc1_ram_bank = 0;
+    bool huc1_ir_mode = false;
     bool vram_locked = false;
     bool oam_locked = false;
     std::vector<uint8_t> cartridge_rom;

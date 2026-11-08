@@ -158,6 +158,15 @@ namespace
             break;
         }
     }
+
+    // MBC7 cartridges read tilt from an accelerometer: I/K tilt up and down,
+    // J/L left and right.
+    void update_tilt_from_keys(CPU_LR35902 &cpu)
+    {
+        const Uint8 *keys = SDL_GetKeyboardState(nullptr);
+        cpu.mbc7_tilt_x = (keys[SDL_SCANCODE_L] ? 1 : 0) - (keys[SDL_SCANCODE_J] ? 1 : 0);
+        cpu.mbc7_tilt_y = (keys[SDL_SCANCODE_K] ? 1 : 0) - (keys[SDL_SCANCODE_I] ? 1 : 0);
+    }
 }
 
 int main(int argc, char **argv)
@@ -397,6 +406,7 @@ int main(int argc, char **argv)
                 else
                 {
                     update_joypad_from_key(cpu, key, pressed);
+                    update_tilt_from_keys(cpu);
                 }
             }
         }
