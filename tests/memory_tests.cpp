@@ -198,6 +198,30 @@ static void test_cgb_speed_switch_and_dma()
     assert(cpu_read(cpu, 0xFF55) == 0xFF && !cpu.hdma_hblank_active);
 }
 
+// The CGB has separate cartridge, WRAM, and VRAM buses, so OAM DMA only
+// blocks the bus it copies from; the DMG's cartridge and WRAM share one.
+static void test_oam_dma_bus_conflicts_by_model()
+{
+    for (const bool cgb : {false, true})
+    {
+        std::vector<uint8_t> rom(0x8000, 0);
+        rom[0x0143] = cgb ? 0xC0 : 0x00;
+        rom[0x1234] = 0x5A;
+        std::string error;
+        CPU_LR35902 cpu{};
+        assert(load_cartridge(cpu, std::move(rom), error, cgb ? GameBoyModel::Cgb : GameBoyModel::DmgABC));
+        cpu.memory[0xC100] = 0xA5;
+        cpu.bus_ticking = true;
+        cpu_write(cpu, 0xFF46, 0xC1); // DMA from WRAM
+        cpu_read(cpu, 0xFF80);
+        cpu_read(cpu, 0xFF80);
+        assert(cpu.oam_dma_active);
+        assert(cpu_read(cpu, 0x1234) == (cgb ? 0x5A : 0xFF)); // ROM
+        assert(cpu_read(cpu, 0xC100) == 0xFF);               // WRAM, being copied from
+        assert(cpu_read(cpu, 0xFE00) == 0xFF);               // OAM, being copied to
+    }
+}
+
 static void test_cgb_registers_in_dmg_mode()
 {
     std::string error;
@@ -224,5 +248,6 @@ int main()
     test_cgb_banks_and_palettes();
     test_cgb_speed_switch_and_dma();
     test_cgb_registers_in_dmg_mode();
+    test_oam_dma_bus_conflicts_by_model();
     return 0;
 }

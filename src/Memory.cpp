@@ -45,6 +45,43 @@ namespace
         return cpu.memory[address];
     }
 
+    // The CGB's buses: the cartridge (ROM and RAM), WRAM, and VRAM. OAM DMA
+    // only takes the bus it copies from (and OAM), so the CPU can keep using
+    // the others. Registers and HRAM are always reachable.
+    enum class CgbBus : uint8_t
+    {
+        Cartridge,
+        Wram,
+        Vram,
+        Oam,
+        Internal
+    };
+
+    CgbBus cgb_bus(uint16_t address)
+    {
+        if (address < 0x8000 || (address >= 0xA000 && address < 0xC000))
+        {
+            return CgbBus::Cartridge;
+        }
+        if (address < 0xA000)
+        {
+            return CgbBus::Vram;
+        }
+        if (address < 0xFE00)
+        {
+            return CgbBus::Wram; // Including echo RAM
+        }
+        return address < 0xFF00 ? CgbBus::Oam : CgbBus::Internal;
+    }
+
+    // Whether OAM DMA keeps the CPU from this address on CGB hardware.
+    bool cgb_dma_conflict(const CPU_LR35902 &cpu, uint16_t address)
+    {
+        const CgbBus bus = cgb_bus(address);
+        const CgbBus source_bus = cgb_bus(static_cast<uint16_t>(cpu.oam_dma_source << 8));
+        return bus == CgbBus::Oam || (bus != CgbBus::Internal && bus == source_bus);
+    }
+
     // Palette RAM cannot be reached while the PPU draws.
     bool palette_ram_accessible(const CPU_LR35902 &cpu)
     {
@@ -582,6 +619,10 @@ uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
     {
         return 0xFF;
     }
+    if (cpu.oam_dma_active && cpu.cgb_hardware)
+    {
+        return cgb_dma_conflict(cpu, address) ? 0xFF : cpu_read_unrestricted(cpu, address);
+    }
     const bool hram_access = address >= HRAM_START && address <= HRAM_END;
     const bool echo_wram_access = address >= ECHO_START && address <= ECHO_END;
     const bool rom_access_during_vram_dma = address >= 0x0100 && address < 0x8000 &&
@@ -804,7 +845,8 @@ namespace
         {
             return;
         }
-        if (cpu.oam_dma_active && address != 0xFF46 && !(address >= HRAM_START && address <= HRAM_END))
+        if (cpu.oam_dma_active && address != 0xFF46 &&
+            (cpu.cgb_hardware ? cgb_dma_conflict(cpu, address) : !(address >= HRAM_START && address <= HRAM_END)))
         {
             return;
         }
