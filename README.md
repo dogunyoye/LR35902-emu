@@ -1,6 +1,6 @@
 # LR35902 Emu
 
-A small [Sharp LR35902](https://gbdev.io/pandocs/CPU.html) (Game Boy) CPU emulator written in C++20.
+A small [Sharp LR35902](https://gbdev.io/pandocs/CPU.html) (Game Boy and Game Boy Color) emulator written in C++20.
 
 ## Status
 
@@ -28,6 +28,8 @@ This project is still a work in progress, but the basic CPU core, memory routing
 | DMG OAM corruption bug | :white_check_mark: done |
 | Sub-M-cycle peripheral conformance (DMA bus conflicts) | :soon: planned |
 | Other mappers (MBC6, HuC3, etc.) | :soon: planned |
+| Game Boy Color: CGB mode (VRAM and WRAM banks, double speed, colour palettes, tile attributes, VRAM DMA) and DMG compatibility mode | :white_check_mark: done |
+| Game Boy Color boot colourisation of DMG games | :soon: planned |
 | Full PPU and hardware fidelity | :soon: planned |
 
 ## Building
@@ -57,17 +59,19 @@ ctest --test-dir build --output-on-failure
 Run a serial-reporting ROM test (for example, a CPU conformance ROM):
 
 ```sh
-./build/rom_test_runner /path/to/test.gb [MAX_CYCLES]
+./build/rom_test_runner /path/to/test.gb [MAX_CYCLES] [MODEL]
 ```
 
-The runner prints serial output and returns 0 when it sees `Passed`, 1 for `Failed`, or 2 if neither marker appears before the cycle limit (default: 50,000,000). It also recognises Mooneye's `LD B,B` register signatures and blargg's cartridge-RAM status at `$A000`. Pass `--screenshot out.ppm` before the ROM path to save the frame for screenshot tests such as dmg-acid2 and Mealybug Tearoom.
+MODEL is `dmg0`, `dmgABC`, `mgb`, `sgb`, `sgb2`, `cgb0`, `cgb`, or `agb`. By default (`auto`) cartridges that only run on the Game Boy Color run on a CGB and everything else on a DMG. The runner prints serial output and returns 0 when it sees `Passed`, 1 for `Failed`, or 2 if neither marker appears before the cycle limit (default: 50,000,000). It also recognises Mooneye's `LD B,B` register signatures and blargg's cartridge-RAM status at `$A000`. Pass `--screenshot out.ppm` before the ROM path to save the frame for screenshot tests such as dmg-acid2, cgb-acid2, and Mealybug Tearoom.
 
-Run the Mooneye, blargg, dmg-acid2, and Mealybug Tearoom suites together (the ROMs are not included in this repository):
+Run the Mooneye, blargg, dmg-acid2, cgb-acid2, and Mealybug Tearoom suites together (the ROMs are not included in this repository):
 
 ```sh
 tests/run_rom_suites.sh --mooneye /path/to/mooneye-test-suite --blargg /path/to/gb-test-roms \
-    --acid2 /path/to/dmg-acid2 --mealybug /path/to/mealybug-tearoom-tests
+    --acid2 /path/to/dmg-acid2 --cgb-acid2 /path/to/cgb-acid2 --mealybug /path/to/mealybug-tearoom-tests
 ```
+
+Mooneye's tests run on the model their file names name; blargg's CPU and timing tests also run a second time on a CGB.
 
 This writes per-ROM logs and `results.tsv` to `build/rom-results`. The screenshot comparisons need Python with Pillow.
 
@@ -88,11 +92,13 @@ Run the demo program:
 ./build/lr35902-emu
 ```
 
-Run a supported ROM-only (32 KiB), MBC1, MBC2, MBC3, MBC5, MBC7, or HuC1 cartridge image:
+Run a supported ROM-only (32 KiB), MBC1, MBC2, MBC3, MBC5, MBC7, or HuC1 cartridge image (`.gb` or `.gbc`):
 
 ```sh
 ./build/lr35902-emu /path/to/game.gb
 ```
+
+Cartridges made for the Game Boy Color (including those that also run on the original Game Boy) run on an emulated CGB in colour; other cartridges run on an emulated DMG.
 
 Battery-backed cartridge RAM is loaded from and saved to a same-basename `.sav` file beside the ROM. MBC3 saves also store the real-time clock in the format BGB and VBA-M use, and the clock catches up on time that passed while the emulator was closed.
 
