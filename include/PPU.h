@@ -6,15 +6,16 @@
 #include <cstddef>
 #include <cstdint>
 
-struct PPU_LR35902
+// Everything the PPU tracks apart from the picture, so it is cheap to copy.
+struct PPU_State
 {
     static constexpr int WIDTH = 160;
     static constexpr int HEIGHT = 144;
     static constexpr std::size_t PIXEL_COUNT = static_cast<std::size_t>(WIDTH) * HEIGHT;
 
-    std::array<std::uint32_t, PIXEL_COUNT> framebuffer{};
     int cycles_into_line = 0;
-    // Dot within the line at which mode 3 ends.
+    // Dot within the line at which mode 3 ends: one dot after the pixel
+    // pipeline outputs its last pixel.
     int mode3_end = 253;
     // Line used for the LY=LYC comparison. -1 disables the comparison, which
     // happens for a few dots after LY changes.
@@ -92,6 +93,11 @@ struct PPU_LR35902
     bool line_start_hold = false;
     bool framebuffer_initialized = false;
     bool stat_interrupt_line = false;
+};
+
+struct PPU_LR35902 : PPU_State
+{
+    std::array<std::uint32_t, PIXEL_COUNT> framebuffer{};
 };
 
 void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles);

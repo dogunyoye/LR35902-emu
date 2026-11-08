@@ -10,7 +10,7 @@ namespace
 {
     constexpr char MAGIC[8] = {'L', 'R', '3', '5', '9', '0', '2', 'S'};
     // Bump whenever the saved fields or the PPU layout change.
-    constexpr uint32_t VERSION = 2;
+    constexpr uint32_t VERSION = 3;
 
     static_assert(std::is_trivially_copyable_v<PPU_LR35902>, "PPU state is saved as raw bytes");
     static_assert(std::is_trivially_copyable_v<APU_LR35902::Channel>, "APU channels are saved as raw bytes");

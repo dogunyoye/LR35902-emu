@@ -24,6 +24,13 @@ namespace
     // dot LY changes, so these include the four dots before mode 2 is reported.
     constexpr int MODE3_START = 81;
     constexpr int STARTUP_MODE3_START = 83;
+    // How far ahead the end of mode 3 must be known: writes are checked four
+    // dots ahead and the STAT interrupt one dot beyond that.
+    constexpr int MODE3_LOOKAHEAD = 6;
+    // Pixels leave the pipeline at most one a dot, plus at most one window
+    // reactivation pixel, so before this pixel mode 3 cannot end within the
+    // lookahead.
+    constexpr int MODE3_LOOKAHEAD_FROM_PIXEL = 160 - MODE3_LOOKAHEAD - 1;
 
     std::uint32_t shade_color(std::uint8_t shade)
     {
@@ -87,13 +94,6 @@ namespace
         return shade_color(shade);
     }
 
-    // The window is fetched once LY has matched WY during the frame, while it
-    // is enabled and WX places it on screen. LCDC bit 0 only blanks its pixels.
-    bool window_visible(const CPU_LR35902 &cpu, const PPU_LR35902 &ppu)
-    {
-        return (cpu.memory[LCDC] & 0x20) != 0 && ppu.window_y_triggered && cpu.memory[WX] <= 166;
-    }
-
     // OAM scan: the first ten objects overlapping this line, in OAM order.
     void scan_line_objects(const CPU_LR35902 &cpu, PPU_LR35902 &ppu, int line)
     {
@@ -142,30 +142,7 @@ namespace
         return next;
     }
 
-    int calculate_mode3_duration(const CPU_LR35902 &cpu, const PPU_LR35902 &ppu)
-    {
-        int duration = 172 + (cpu.memory[SCX] & 0x07);
-        if (window_visible(cpu, ppu))
-        {
-            duration += 6;
-        }
-
-        if ((cpu.memory[LCDC] & 0x02) != 0)
-        {
-            std::array<PPU_LR35902::LineObject, 10> objects = ppu.line_objects;
-            std::array<bool, 32> penalised_tiles{};
-            for (int index = next_object(objects, ppu.line_object_count); index >= 0;
-                 index = next_object(objects, ppu.line_object_count))
-            {
-                PPU_LR35902::LineObject &object = objects[static_cast<std::size_t>(index)];
-                object.fetched = true;
-                duration += object_penalty(cpu, penalised_tiles, object.x);
-            }
-        }
-        return duration;
-    }
-
-    void start_pixel_pipeline(const CPU_LR35902 &cpu, PPU_LR35902 &ppu)
+    void start_pixel_pipeline(const CPU_LR35902 &cpu, PPU_State &ppu)
     {
         // The first fetch of a line is a dot shorter, and the fetcher waits a
         // dot before pushing the first tile.
@@ -200,14 +177,14 @@ namespace
         return static_cast<std::uint16_t>(0x9000 + static_cast<std::int8_t>(tile_id) * 16 + row * 2);
     }
 
-    int fetch_row(const CPU_LR35902 &cpu, const PPU_LR35902 &ppu)
+    int fetch_row(const CPU_LR35902 &cpu, const PPU_State &ppu)
     {
         return ppu.fetch_window ? ppu.window_line & 0x07 : (cpu.memory[LY] + cpu.memory[SCY]) & 0x07;
     }
 
     // One dot of the background fetcher. Registers are read at the stage that
     // uses them, so mid-line writes affect the tiles fetched afterwards.
-    void fetch_tile_index(const CPU_LR35902 &cpu, PPU_LR35902 &ppu, std::uint8_t lcdc)
+    void fetch_tile_index(const CPU_LR35902 &cpu, PPU_State &ppu, std::uint8_t lcdc)
     {
         if (ppu.fetch_window && (lcdc & 0x20) == 0)
         {
@@ -230,7 +207,7 @@ namespace
         }
     }
 
-    void advance_fetcher(const CPU_LR35902 &cpu, PPU_LR35902 &ppu)
+    void advance_fetcher(const CPU_LR35902 &cpu, PPU_State &ppu)
     {
         const std::uint8_t lcdc = cpu.memory[LCDC];
         switch (ppu.fetch_step)
@@ -294,7 +271,7 @@ namespace
         ++ppu.fetch_step;
     }
 
-    void load_object(const CPU_LR35902 &cpu, PPU_LR35902 &ppu, int index)
+    void load_object(const CPU_LR35902 &cpu, PPU_State &ppu, int index)
     {
         PPU_LR35902::LineObject &object = ppu.line_objects[static_cast<std::size_t>(index)];
         object.fetched = true;
@@ -331,7 +308,7 @@ namespace
     }
 
     // Pops the next pixel from the shifters. It is coloured two dots later.
-    PPU_LR35902::PendingPixel output_pixel(PPU_LR35902 &ppu)
+    PPU_LR35902::PendingPixel output_pixel(PPU_State &ppu)
     {
         const std::uint8_t background_color = static_cast<std::uint8_t>(
             ((ppu.background_high >> 7) << 1) | (ppu.background_low >> 7));
@@ -356,7 +333,8 @@ namespace
     }
 
     // Palettes and the enable bits are read as each pixel is coloured.
-    void resolve_pixel(const CPU_LR35902 &cpu, PPU_LR35902 &ppu, const PPU_LR35902::PendingPixel &pixel)
+    void resolve_pixel(const CPU_LR35902 &cpu, PPU_State &ppu, const PPU_LR35902::PendingPixel &pixel,
+                       std::uint32_t *framebuffer)
     {
         const std::uint8_t lcdc = ppu.resolve_lcdc;
         const std::uint8_t visible_background = (lcdc & 0x01) != 0 ? pixel.background_color : 0;
@@ -367,10 +345,15 @@ namespace
         {
             color = palette_color(cpu, (pixel.object_attributes & 0x10) != 0 ? OBP1 : OBP0, pixel.object_color);
         }
-        ppu.framebuffer[static_cast<std::size_t>(cpu.memory[LY]) * PPU_LR35902::WIDTH + pixel.x] = color;
+        if (framebuffer != nullptr)
+        {
+            framebuffer[static_cast<std::size_t>(cpu.memory[LY]) * PPU_LR35902::WIDTH + pixel.x] = color;
+        }
     }
 
-    void advance_pixel_pipeline(const CPU_LR35902 &cpu, PPU_LR35902 &ppu)
+    // One dot of the pixel pipeline. Without a framebuffer it runs without
+    // drawing, to look ahead.
+    void advance_pixel_pipeline(const CPU_LR35902 &cpu, PPU_State &ppu, std::uint32_t *framebuffer)
     {
         if (!ppu.drawing)
         {
@@ -382,7 +365,7 @@ namespace
             PPU_LR35902::PendingPixel &pixel = ppu.pending_pixels[static_cast<std::size_t>(index)];
             if (--pixel.delay == 0)
             {
-                resolve_pixel(cpu, ppu, pixel);
+                resolve_pixel(cpu, ppu, pixel, framebuffer);
             }
             else
             {
@@ -538,8 +521,44 @@ namespace
         while (ppu.drawing)
         {
             ppu.stall_dots = std::min(ppu.stall_dots, 1);
-            advance_pixel_pipeline(cpu, ppu);
+            advance_pixel_pipeline(cpu, ppu, ppu.framebuffer.data());
         }
+    }
+
+    // Mode 3 ends a dot after the pipeline outputs its last pixel. The CPU sees
+    // mode 0 coming early, through the STAT interrupt and write blocking, so
+    // near the end of the line a copy of the pipeline is run ahead to find the
+    // dot, assuming no more register writes.
+    void update_mode3_end(const CPU_LR35902 &cpu, PPU_LR35902 &ppu)
+    {
+        if (ppu.pixel_x >= PPU_LR35902::WIDTH)
+        {
+            ppu.mode3_end = std::min(ppu.mode3_end, ppu.cycles_into_line);
+            return;
+        }
+        ppu.mode3_end = 456;
+        if (ppu.pixel_x < MODE3_LOOKAHEAD_FROM_PIXEL)
+        {
+            return;
+        }
+        PPU_State ahead = ppu;
+        for (int dot = 0; dot < MODE3_LOOKAHEAD; ++dot)
+        {
+            advance_pixel_pipeline(cpu, ahead, nullptr);
+            if (ahead.pixel_x >= PPU_LR35902::WIDTH)
+            {
+                ppu.mode3_end = ppu.cycles_into_line + dot + 1;
+                return;
+            }
+        }
+    }
+
+    void start_mode3(CPU_LR35902 &cpu, PPU_LR35902 &ppu)
+    {
+        scan_line_objects(cpu, ppu, cpu.memory[LY]);
+        start_pixel_pipeline(cpu, ppu);
+        ppu.mode3_end = 456;
+        update_status(cpu, ppu, 3);
     }
 
     void advance_scanline(CPU_LR35902 &cpu, PPU_LR35902 &ppu)
@@ -648,7 +667,8 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         }
         else if (ppu.mode == 3)
         {
-            mode_boundary = ppu.cycles_into_line < ppu.mode3_end - 1 ? ppu.mode3_end - 1 : ppu.mode3_end;
+            // Near the end, the end of mode 3 is found a dot at a time.
+            mode_boundary = ppu.cycles_into_line + std::max(1, MODE3_LOOKAHEAD_FROM_PIXEL - 1 - ppu.pixel_x);
         }
         else if (ppu.mode == 0)
         {
@@ -674,7 +694,7 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         const int step = std::min(cycles, mode_boundary - ppu.cycles_into_line);
         for (int dot = 0; dot < step; ++dot)
         {
-            advance_pixel_pipeline(cpu, ppu);
+            advance_pixel_pipeline(cpu, ppu, ppu.framebuffer.data());
             ppu.resolve_lcdc = cpu.memory[LCDC];
             ppu.bgp_write_pending = false; // The blended BGP lasts only for the dot after the write.
             ++ppu.cycles_into_line;
@@ -693,18 +713,12 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         else if (ppu.mode == 2)
         {
             ppu.window_y_triggered = ppu.window_y_triggered || cpu.memory[LY] == cpu.memory[WY];
-            scan_line_objects(cpu, ppu, cpu.memory[LY]);
-            ppu.mode3_end = MODE3_START + calculate_mode3_duration(cpu, ppu);
-            start_pixel_pipeline(cpu, ppu);
-            update_status(cpu, ppu, 3);
-        }
-        else if (ppu.mode == 3 && ppu.cycles_into_line < ppu.mode3_end)
-        {
-            update_status(cpu, ppu, 3);
+            start_mode3(cpu, ppu);
         }
         else if (ppu.mode == 3)
         {
-            update_status(cpu, ppu, 0);
+            update_mode3_end(cpu, ppu);
+            update_status(cpu, ppu, ppu.cycles_into_line < ppu.mode3_end ? 3 : 0);
         }
         else if (ppu.mode == 0)
         {
@@ -712,10 +726,7 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
             {
                 ppu.startup_mode0 = false;
                 ppu.window_y_triggered = cpu.memory[LY] == cpu.memory[WY];
-                scan_line_objects(cpu, ppu, cpu.memory[LY]);
-                ppu.mode3_end = STARTUP_MODE3_START + calculate_mode3_duration(cpu, ppu);
-                start_pixel_pipeline(cpu, ppu);
-                update_status(cpu, ppu, 3);
+                start_mode3(cpu, ppu);
             }
             else if (ppu.line_start_hold)
             {
