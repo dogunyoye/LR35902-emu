@@ -190,8 +190,70 @@ namespace
 }
 }
 
+namespace
+{
+    uint16_t oam_word(const CPU_LR35902 &cpu, int row, int word)
+    {
+        const std::size_t address = OAM_START + static_cast<std::size_t>(row * 8 + word * 2);
+        return static_cast<uint16_t>(cpu.memory[address] | (cpu.memory[address + 1] << 8));
+    }
+
+    void set_oam_word(CPU_LR35902 &cpu, int row, int word, uint16_t value)
+    {
+        const std::size_t address = OAM_START + static_cast<std::size_t>(row * 8 + word * 2);
+        cpu.memory[address] = static_cast<uint8_t>(value);
+        cpu.memory[address + 1] = static_cast<uint8_t>(value >> 8);
+    }
+
+    void copy_oam_row(CPU_LR35902 &cpu, int from_row, int to_row, int first_byte)
+    {
+        for (int index = first_byte; index < 8; ++index)
+        {
+            cpu.memory[OAM_START + to_row * 8 + index] = cpu.memory[OAM_START + from_row * 8 + index];
+        }
+    }
+}
+
+// The corrupted row is the one the PPU is reading, whatever the address. The
+// first row is never corrupted.
+void cpu_corrupt_oam(CPU_LR35902 &cpu, uint16_t address, OamCorruption corruption)
+{
+    if (address < 0xFE00 || address > 0xFEFF || !cpu.bus_ticking || cpu.ppu == nullptr)
+    {
+        return;
+    }
+    const int row = ppu_oam_scan_row(cpu, *cpu.ppu);
+    if (row < 1)
+    {
+        return;
+    }
+    const uint16_t a = oam_word(cpu, row, 0);
+    const uint16_t b = oam_word(cpu, row - 1, 0);
+    const uint16_t c = oam_word(cpu, row - 1, 2);
+    switch (corruption)
+    {
+    case OamCorruption::Write:
+        set_oam_word(cpu, row, 0, static_cast<uint16_t>(((a ^ c) & (b ^ c)) ^ c));
+        copy_oam_row(cpu, row - 1, row, 2);
+        break;
+    case OamCorruption::Read:
+        set_oam_word(cpu, row, 0, static_cast<uint16_t>(b | (a & c)));
+        copy_oam_row(cpu, row - 1, row, 2);
+        break;
+    case OamCorruption::IncrementRead:
+        if (row >= 4 && row < 19)
+        {
+            const uint16_t two_back = oam_word(cpu, row - 2, 0);
+            set_oam_word(cpu, row - 1, 0, static_cast<uint16_t>((b & (two_back | a | c)) | (two_back & a & c)));
+            copy_oam_row(cpu, row - 1, row - 2, 0);
+        }
+        break;
+    }
+}
+
 uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
 {
+    cpu_corrupt_oam(cpu, address, OamCorruption::Read);
     if (cpu.bus_ticking)
     {
         tick_peripherals(cpu, 4); // Reads sample the bus at the end of their M-cycle.
@@ -538,6 +600,7 @@ namespace
 
 void cpu_write(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
 {
+    cpu_corrupt_oam(cpu, address, OamCorruption::Write);
     if (cpu.bus_ticking)
     {
         // The timer, DMA, and serial clocks advance before a write lands, while

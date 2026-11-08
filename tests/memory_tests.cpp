@@ -1,4 +1,5 @@
 #include "LR35902.h"
+#include "PPU.h"
 
 #include <cassert>
 
@@ -78,6 +79,48 @@ static void test_oam_dma_fe_source_uses_echo_bus()
     assert(cpu.memory[0xFE01] == 0xD5);
 }
 
+static void fill_oam_pattern(CPU_LR35902 &cpu)
+{
+    for (int index = 0; index < 0xA0; ++index)
+    {
+        cpu.memory[0xFE00 + index] = static_cast<uint8_t>(index * 7 + 3);
+    }
+}
+
+static void test_oam_corruption()
+{
+    CPU_LR35902 cpu{};
+    PPU_LR35902 ppu{};
+    cpu.ppu = &ppu;
+    cpu.memory[0xFF40] = 0x91;
+    update_ppu(cpu, ppu, 456 + 8); // Line 1, scanning OAM row 3
+    assert(ppu_oam_scan_row(cpu, ppu) == 3);
+    cpu.bus_ticking = true;
+
+    fill_oam_pattern(cpu);
+    const uint16_t a = static_cast<uint16_t>(cpu.memory[0xFE18] | (cpu.memory[0xFE19] << 8));
+    const uint16_t b = static_cast<uint16_t>(cpu.memory[0xFE10] | (cpu.memory[0xFE11] << 8));
+    const uint16_t c = static_cast<uint16_t>(cpu.memory[0xFE14] | (cpu.memory[0xFE15] << 8));
+    cpu_corrupt_oam(cpu, 0xFE40, OamCorruption::Write);
+    const uint16_t written = static_cast<uint16_t>(((a ^ c) & (b ^ c)) ^ c);
+    assert(cpu.memory[0xFE18] == static_cast<uint8_t>(written));
+    assert(cpu.memory[0xFE19] == static_cast<uint8_t>(written >> 8));
+    for (int index = 2; index < 8; ++index)
+    {
+        assert(cpu.memory[0xFE18 + index] == cpu.memory[0xFE10 + index]); // Copied from the previous row
+    }
+
+    fill_oam_pattern(cpu);
+    cpu_corrupt_oam(cpu, 0xFDFF, OamCorruption::Write); // Address outside OAM
+    cpu_corrupt_oam(cpu, 0xFF00, OamCorruption::Read);
+    assert(cpu.memory[0xFE18] == static_cast<uint8_t>(0x18 * 7 + 3));
+
+    update_ppu(cpu, ppu, 100); // Mode 3: no OAM scan
+    assert(ppu_oam_scan_row(cpu, ppu) == -1);
+    cpu_corrupt_oam(cpu, 0xFE00, OamCorruption::Read);
+    assert(cpu.memory[0xFE18] == static_cast<uint8_t>(0x18 * 7 + 3));
+}
+
 int main()
 {
     test_unusable_oam_region();
@@ -85,5 +128,6 @@ int main()
     test_ly_is_read_only();
     test_oam_dma_transfer_and_bus_lock();
     test_oam_dma_fe_source_uses_echo_bus();
+    test_oam_corruption();
     return 0;
 }

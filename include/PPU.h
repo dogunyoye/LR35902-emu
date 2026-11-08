@@ -98,3 +98,5 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles);
 // Whether a CPU write landing now is blocked by the PPU.
 bool ppu_blocks_vram_write(const PPU_LR35902 &ppu);
 bool ppu_blocks_oam_write(const PPU_LR35902 &ppu);
+// The 8-byte OAM row the OAM scan is reading, or -1 outside the scan.
+int ppu_oam_scan_row(const CPU_LR35902 &cpu, const PPU_LR35902 &ppu);

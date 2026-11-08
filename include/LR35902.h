@@ -152,6 +152,17 @@ uint16_t cpu_pop16(CPU_LR35902 &cpu);
 void update_timers(CPU_LR35902 &cpu, int cycles);
 void update_oam_dma(CPU_LR35902 &cpu, int cycles);
 void tick_peripherals(CPU_LR35902 &cpu, int cycles);
+// The DMG corrupts OAM when the CPU puts an address in $FE00-$FEFF on the bus
+// while the PPU is scanning OAM. IncrementRead is the extra corruption of a
+// read that also increments the address (POP, LD A,(HL+), LD A,(HL-)); the
+// read itself then causes a Read corruption.
+enum class OamCorruption : uint8_t
+{
+    Write,
+    Read,
+    IncrementRead
+};
+void cpu_corrupt_oam(CPU_LR35902 &cpu, uint16_t address, OamCorruption corruption);
 void reset_divider(CPU_LR35902 &cpu);
 void write_timer_control(CPU_LR35902 &cpu, uint8_t value);
 void update_serial(CPU_LR35902 &cpu, int cycles);

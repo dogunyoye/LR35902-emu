@@ -784,3 +784,17 @@ bool ppu_blocks_oam_write(const PPU_LR35902 &ppu)
         return false;
     }
 }
+
+// The OAM scan reads one row per M-cycle from the start of each visible line.
+// The CPU's accesses are checked at the start of its M-cycle, by which time the
+// scan has moved on to the next row.
+int ppu_oam_scan_row(const CPU_LR35902 &cpu, const PPU_LR35902 &ppu)
+{
+    if (!ppu.lcd_enabled || ppu.startup_mode0 || cpu.memory[LY] >= 144 ||
+        !(ppu.line_start_hold || (ppu.mode == 2 && ppu.cycles_into_line < 80)))
+    {
+        return -1;
+    }
+    const int row = ppu.cycles_into_line / 4 + 1;
+    return row < 20 ? row : -1;
+}

@@ -357,6 +357,20 @@ namespace
         }
     }
 
+    // An internal M-cycle in which the 16-bit increment unit puts a register
+    // on the address bus, which can corrupt OAM.
+    void tick_increment_cycle(CPU_LR35902 &cpu, uint16_t address)
+    {
+        cpu_corrupt_oam(cpu, address, OamCorruption::Write);
+        tick_internal_cycle(cpu);
+    }
+
+    uint8_t read_and_increment(CPU_LR35902 &cpu, uint16_t address)
+    {
+        cpu_corrupt_oam(cpu, address, OamCorruption::IncrementRead);
+        return cpu_read(cpu, address);
+    }
+
     uint16_t add_sp_offset(CPU_LR35902 &cpu, uint8_t offset)
     {
         const uint16_t old_sp = cpu.sp;
@@ -380,7 +394,7 @@ uint16_t cpu_read16(CPU_LR35902 &cpu, uint16_t address)
 // Every push (PUSH, CALL, RST) spends an internal M-cycle before writing.
 void cpu_push16(CPU_LR35902 &cpu, uint16_t val)
 {
-    tick_internal_cycle(cpu);
+    tick_increment_cycle(cpu, cpu.sp);
     --cpu.sp;
     cpu_write(cpu, cpu.sp, static_cast<uint8_t>(val >> 8));
     --cpu.sp;
@@ -390,8 +404,8 @@ void cpu_push16(CPU_LR35902 &cpu, uint16_t val)
 // Pop a 16-bit value off the stack (SP increments by 2)
 uint16_t cpu_pop16(CPU_LR35902 &cpu)
 {
-    uint8_t low = cpu_read(cpu, cpu.sp);
-    uint8_t high = cpu_read(cpu, cpu.sp + 1);
+    uint8_t low = read_and_increment(cpu, cpu.sp);
+    uint8_t high = read_and_increment(cpu, static_cast<uint16_t>(cpu.sp + 1));
     cpu.sp += 2;
     return static_cast<uint16_t>((high << 8) | low);
 }
@@ -427,6 +441,7 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
 
     case 0x03: // INC BC
+        tick_increment_cycle(cpu, cpu.bc.reg16);
         cpu.bc.reg16 += 1;
         cycles = 8;
         break;
@@ -488,6 +503,7 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
 
     case 0x0B: // DEC BC
+        tick_increment_cycle(cpu, cpu.bc.reg16);
         cpu.bc.reg16 -= 1;
         cycles = 8;
         break;
@@ -535,6 +551,7 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
 
     case 0x13: // INC DE
+        tick_increment_cycle(cpu, cpu.de.reg16);
         cpu.de.reg16 += 1;
         cycles = 8;
         break;
@@ -586,6 +603,7 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
 
     case 0x1B: // DEC DE
+        tick_increment_cycle(cpu, cpu.de.reg16);
         cpu.de.reg16 -= 1;
         cycles = 8;
         break;
@@ -641,6 +659,7 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
 
     case 0x23: // INC HL
+        tick_increment_cycle(cpu, cpu.hl.reg16);
         cpu.hl.reg16 += 1;
         cycles = 8;
         break;
@@ -703,12 +722,13 @@ int execute_instruction(CPU_LR35902 &cpu)
     }
 
     case 0x2A: // LD A, (HL+)
-        cpu.af.reg8.high = cpu_read(cpu, cpu.hl.reg16);
+        cpu.af.reg8.high = read_and_increment(cpu, cpu.hl.reg16);
         cpu.hl.reg16 += 1;
         cycles = 8;
         break;
 
     case 0x2B: // DEC HL
+        tick_increment_cycle(cpu, cpu.hl.reg16);
         cpu.hl.reg16 -= 1;
         cycles = 8;
         break;
@@ -747,6 +767,7 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
 
     case 0x33: // INC SP
+        tick_increment_cycle(cpu, cpu.sp);
         cpu.sp += 1;
         cycles = 8;
         break;
@@ -779,12 +800,13 @@ int execute_instruction(CPU_LR35902 &cpu)
         break;
 
     case 0x3A: // LD A, (HL-)
-        cpu.af.reg8.high = cpu_read(cpu, cpu.hl.reg16);
+        cpu.af.reg8.high = read_and_increment(cpu, cpu.hl.reg16);
         cpu.hl.reg16 -= 1;
         cycles = 8;
         break;
 
     case 0x3B: // DEC SP
+        tick_increment_cycle(cpu, cpu.sp);
         cpu.sp -= 1;
         cycles = 8;
         break;
