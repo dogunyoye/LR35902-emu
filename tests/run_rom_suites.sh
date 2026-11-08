@@ -57,7 +57,11 @@ export RUNNER out
   fi
   if [ -n "$blargg" ]; then
     # The cgb_sound and interrupt_time ROMs only run on Game Boy Color hardware.
-    find "$blargg" -name '*.gb' ! -path '*/cgb_sound/*' ! -path '*/interrupt_time/*' -print0 |
+    # The standalone oam_bug 7-timing_effect ROM writes its output to cartridge
+    # RAM without a bound and overflows into its own code; the combined
+    # oam_bug.gb runs the same test and checks that output by CRC.
+    find "$blargg" -name '*.gb' ! -path '*/cgb_sound/*' ! -path '*/interrupt_time/*' \
+      ! -path '*/oam_bug/rom_singles/7-timing_effect.gb' -print0 |
       xargs -0 -P 8 -I{} bash -c 'run_one blargg "$1" dmgABC 1000000000 "$2"' _ {} "$blargg"
   fi
   if [ -n "$acid2" ]; then
