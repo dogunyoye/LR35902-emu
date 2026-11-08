@@ -42,7 +42,7 @@ Builds are optimised (`Release`) unless another build type is given.
 This generates:
 
 - the static library: `build/liblr35902.a`
-- test executables: `build/cpu_tests`, `build/timer_tests`, `build/cartridge_tests`, `build/memory_tests`, `build/joypad_tests`, `build/serial_tests`, `build/ppu_tests`, and `build/apu_tests`
+- test executables: `build/cpu_tests`, `build/timer_tests`, `build/cartridge_tests`, `build/memory_tests`, `build/joypad_tests`, `build/serial_tests`, `build/ppu_tests`, `build/apu_tests`, and `build/save_state_tests`
 - the emulator CLI: `build/lr35902-emu`
 - the serial ROM test runner: `build/rom_test_runner`
 
@@ -94,7 +94,9 @@ Run a supported ROM-only (32 KiB), MBC1, MBC2, MBC3, or MBC5 cartridge image:
 
 Battery-backed cartridge RAM is loaded from and saved to a same-basename `.sav` file beside the ROM. MBC3 saves also store the real-time clock in the format BGB and VBA-M use, and the clock catches up on time that passed while the emulator was closed.
 
-Controls: arrow keys move, Z is A, X is B, Right Shift is Select, and Enter is Start.
+Controls: arrow keys move, Z is A, X is B, Right Shift is Select, and Enter is Start. Hold Tab to fast-forward at four times normal speed (sound is muted meanwhile).
+
+F5 saves the whole machine state to a same-basename `.state` file beside the ROM, and F8 loads it back. A state only loads into the same build of the emulator running the same ROM. Loading a state also restores the cartridge RAM it was saved with, which is then written to the `.sav` file on exit as usual.
 
 Show usage/help:
 
@@ -111,13 +113,15 @@ Show usage/help:
 ├── include/
 │   ├── LR35902.h        # CPU state model, flags, public API
 │   ├── PPU.h            # PPU state and pixel pipeline
-│   └── APU.h            # Sound channel state and sample output
+│   ├── APU.h            # Sound channel state and sample output
+│   └── SaveState.h      # Save state serialisation
 ├── src/
 │   ├── LR35902.cpp      # Instruction decoder, flags, interrupt stepping
 │   ├── Memory.cpp       # Memory routing and access rules
 │   ├── Cartridge.cpp    # Cartridge validation, banking, and save RAM
 │   ├── PPU.cpp          # LCD modes, scanlines, and the per-dot pixel FIFO
 │   ├── APU.cpp          # Sound channels, frame sequencer, and mixing
+│   ├── SaveState.cpp    # Save state format, loading, and saving
 │   ├── Serial.cpp       # Internal-clock serial transfers and test output
 │   ├── Timer.cpp        # Divider/timer register updates
 │   └── main.cpp         # CLI entry point and demo runner
@@ -130,6 +134,7 @@ Show usage/help:
 │   ├── serial_tests.cpp     # Serial transfer and interrupt behavior
 │   ├── ppu_tests.cpp        # PPU modes, scanlines, window, and sprites
 │   ├── apu_tests.cpp        # Sound registers, length counters, and output
+│   ├── save_state_tests.cpp # Save state round trips and rejected states
 │   ├── rom_test_runner.cpp  # ROM conformance runner (serial, signatures, screenshots)
 │   ├── run_rom_suites.sh    # Runs the Mooneye, blargg, dmg-acid2, and Mealybug suites
 │   └── compare_screenshot.py # Compares screenshots with DMG reference images

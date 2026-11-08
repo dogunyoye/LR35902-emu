@@ -1,5 +1,6 @@
 #include "LR35902.h"
 #include "PPU.h"
+#include "SaveState.h"
 
 #include <SDL2/SDL.h>
 
@@ -19,6 +20,8 @@ namespace
     constexpr int GB_HEIGHT = PPU_LR35902::HEIGHT;
     constexpr int SCALE = 4;
     constexpr int CYCLES_PER_FRAME = 70224;
+    // Frames run per displayed frame while fast-forwarding.
+    constexpr int FAST_FORWARD_FRAMES = 4;
 
     void print_usage(const char *program_name)
     {
@@ -177,10 +180,13 @@ int main(int argc, char **argv)
 
     CPU_LR35902 cpu{};
     std::filesystem::path save_path;
+    std::filesystem::path state_path;
 
     if (argc == 2)
     {
         const std::filesystem::path rom_path(argv[1]);
+        state_path = rom_path;
+        state_path.replace_extension(".state");
         std::string rom_error;
         if (!load_rom(cpu, rom_path, rom_error))
         {
@@ -305,9 +311,11 @@ int main(int argc, char **argv)
     Uint64 next_frame_time = SDL_GetPerformanceCounter();
 
     bool running = true;
+    bool fast_forward = false;
     int cycle_accumulator = 0;
 
-    const auto run_frame = [&]()
+    // Audio is dropped while fast-forwarding.
+    const auto run_frame = [&](bool play_audio)
     {
         while (cycle_accumulator < CYCLES_PER_FRAME)
         {
@@ -315,7 +323,11 @@ int main(int argc, char **argv)
         }
         cycle_accumulator -= CYCLES_PER_FRAME;
 
-        if (audio_device != 0)
+        if (!play_audio)
+        {
+            cpu.apu.samples.clear();
+        }
+        else if (audio_device != 0)
         {
             const Uint32 queued_bytes = SDL_GetQueuedAudioSize(audio_device);
             if (queued_bytes < MAX_QUEUED_AUDIO_BYTES)
@@ -350,6 +362,38 @@ int main(int argc, char **argv)
                 {
                     running = false;
                 }
+                else if (key == SDLK_TAB)
+                {
+                    fast_forward = pressed;
+                }
+                else if (pressed && event.key.repeat == 0 && key == SDLK_F5 && !state_path.empty())
+                {
+                    std::string state_error;
+                    if (save_state_file(cpu, ppu, state_path, state_error))
+                    {
+                        std::cout << "Saved state to " << state_path.string() << std::endl;
+                    }
+                    else
+                    {
+                        std::cerr << "Unable to save state: " << state_error << std::endl;
+                    }
+                }
+                else if (pressed && event.key.repeat == 0 && key == SDLK_F8 && !state_path.empty())
+                {
+                    std::string state_error;
+                    if (load_state_file(cpu, ppu, state_path, state_error))
+                    {
+                        std::cout << "Loaded state from " << state_path.string() << std::endl;
+                        if (audio_device != 0)
+                        {
+                            SDL_ClearQueuedAudio(audio_device);
+                        }
+                    }
+                    else
+                    {
+                        std::cerr << "Unable to load state: " << state_error << std::endl;
+                    }
+                }
                 else
                 {
                     update_joypad_from_key(cpu, key, pressed);
@@ -360,14 +404,25 @@ int main(int argc, char **argv)
             break;
 
         const Uint64 now = SDL_GetPerformanceCounter();
-        if (now > next_frame_time + 4 * ticks_per_frame)
+        if (fast_forward)
         {
-            next_frame_time = now; // Fell far behind: don't try to catch up in a burst.
+            for (int frame = 0; frame < FAST_FORWARD_FRAMES; ++frame)
+            {
+                run_frame(false);
+            }
+            next_frame_time = now + ticks_per_frame;
         }
-        while (next_frame_time <= now)
+        else
         {
-            run_frame();
-            next_frame_time += ticks_per_frame;
+            if (now > next_frame_time + 4 * ticks_per_frame)
+            {
+                next_frame_time = now; // Fell far behind: don't try to catch up in a burst.
+            }
+            while (next_frame_time <= now)
+            {
+                run_frame(true);
+                next_frame_time += ticks_per_frame;
+            }
         }
 
         SDL_UpdateTexture(texture, nullptr, ppu.framebuffer.data(), GB_WIDTH * sizeof(uint32_t));
