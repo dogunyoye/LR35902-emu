@@ -357,8 +357,10 @@ namespace
         ppu.object_colors[7] = 0;
     }
 
-    // Pops the next pixel from the shifters. It is coloured two dots later.
-    PPU_LR35902::PendingPixel output_pixel(PPU_State &ppu)
+    // Pops the next pixel from the shifters onto the end of the pending queue,
+    // to be coloured two dots later. Pixels off screen or scrolled away are
+    // dropped.
+    void output_pixel(PPU_State &ppu)
     {
         const std::uint8_t background_color = static_cast<std::uint8_t>(
             ((ppu.background_high >> 7) << 1) | (ppu.background_low >> 7));
@@ -368,22 +370,26 @@ namespace
         if (ppu.invisible_pixels > 0)
         {
             --ppu.invisible_pixels;
-            return {};
+            return;
         }
         if (ppu.discard_pixels > 0)
         {
             --ppu.discard_pixels;
-            return {};
+            return;
         }
 
-        const std::uint8_t delay = ppu.first_pixel_delayed ? 3 : 2;
+        // Filled in place: building the pixel and copying it in costs more.
+        PPU_LR35902::PendingPixel &pixel = ppu.pending_pixels[static_cast<std::size_t>(ppu.pending_count++)];
+        pixel.valid = true;
+        pixel.delay = ppu.first_pixel_delayed ? 3 : 2;
+        pixel.x = static_cast<std::uint8_t>(ppu.pixel_x);
+        pixel.background_color = background_color;
+        pixel.object_color = ppu.object_colors[0];
+        pixel.object_attributes = ppu.object_attributes[0];
+        pixel.background_attributes = ppu.background_attributes;
         ppu.first_pixel_delayed = false;
-        const PPU_LR35902::PendingPixel pixel{true, delay, static_cast<std::uint8_t>(ppu.pixel_x), background_color,
-                                              ppu.object_colors[0], ppu.object_attributes[0],
-                                              ppu.background_attributes};
         shift_object_pixels(ppu);
         ++ppu.pixel_x;
-        return pixel;
     }
 
     // Palettes and the enable bits are read as each pixel is coloured.
@@ -538,11 +544,7 @@ namespace
 
         if (ppu.background_count > 0)
         {
-            const PPU_LR35902::PendingPixel pixel = output_pixel(ppu);
-            if (pixel.valid)
-            {
-                ppu.pending_pixels[static_cast<std::size_t>(ppu.pending_count++)] = pixel;
-            }
+            output_pixel(ppu);
         }
     }
 
