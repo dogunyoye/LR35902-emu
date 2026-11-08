@@ -73,6 +73,23 @@ static void test_lcd_off_resets_ly()
     assert(cpu.memory[0xFF44] == 0);
 }
 
+static void test_ly_reads_zero_on_line_153()
+{
+    CPU_LR35902 cpu{};
+    PPU_LR35902 ppu{};
+    cpu.memory[0xFF40] = 0x91;
+    update_ppu(cpu, ppu, 153 * 456 + 2);
+    assert(cpu.memory[0xFF44] == 153);
+    update_ppu(cpu, ppu, 4);
+    assert(cpu.memory[0xFF44] == 0); // For the rest of line 153
+    assert((cpu.memory[0xFF41] & 0x03) == 1);
+    update_ppu(cpu, ppu, 456 - 6);
+    assert(cpu.memory[0xFF44] == 0); // Line 0
+    assert((cpu.memory[0xFF41] & 0x03) != 1);
+    update_ppu(cpu, ppu, 456);
+    assert(cpu.memory[0xFF44] == 1);
+}
+
 static void test_ppu_window_composition()
 {
     CPU_LR35902 cpu{};
@@ -349,6 +366,7 @@ int main()
 {
     test_ppu_modes_scanlines_and_background();
     test_lcd_off_resets_ly();
+    test_ly_reads_zero_on_line_153();
     test_cgb_tile_attributes_objects_and_priority();
     test_ppu_window_composition();
     test_ppu_sprite_priority_palettes_flips_and_8x16();

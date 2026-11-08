@@ -101,6 +101,8 @@ struct PPU_State
     bool has_started = false;
     bool startup_mode0 = false;
     bool line_start_hold = false;
+    // On line 153 LY reads 153 only briefly, then 0 for the rest of the line.
+    bool on_line_153 = false;
     bool framebuffer_initialized = false;
     bool stat_interrupt_line = false;
 };

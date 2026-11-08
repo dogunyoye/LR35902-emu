@@ -23,6 +23,9 @@ namespace
     // Dot within a line at which STAT reports mode 3. Lines are timed from the
     // dot LY changes, so these include the four dots before mode 2 is reported.
     constexpr int MODE3_START = 81;
+    // Dots into line 153 after which LY reads 0. (Also how far into line 144
+    // the mode 1 interrupt is raised.)
+    constexpr int LINE_153_LY_DOTS = 4;
     // Dot on line 143 at which the CGB raises line 144's mode 2 STAT interrupt.
     constexpr int CGB_LINE_144_STAT_DOT = 452;
     constexpr int STARTUP_MODE3_START = 83;
@@ -598,8 +601,8 @@ namespace
     void advance_scanline(CPU_LR35902 &cpu, PPU_LR35902 &ppu)
     {
         finish_pixel_pipeline(cpu, ppu);
-        std::uint8_t ly = cpu.memory[LY];
-        ly = ly == 153 ? 0 : static_cast<std::uint8_t>(ly + 1);
+        std::uint8_t ly = ppu.on_line_153 ? 0 : static_cast<std::uint8_t>(cpu.memory[LY] + 1);
+        ppu.on_line_153 = ly == 153;
         cpu.memory[LY] = ly;
         ppu.cycles_into_line = 0;
 
@@ -653,6 +656,7 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
             std::fill(ppu.framebuffer.begin(), ppu.framebuffer.end(), shade_color(0));
         }
         ppu.lcd_enabled = false;
+        ppu.on_line_153 = false;
         ppu.drawing = false;
         ppu.startup_mode0 = false;
         ppu.line_start_hold = false;
@@ -728,7 +732,9 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         else
         {
             // The mode 1 interrupt is raised four dots into line 144.
-            mode_boundary = cpu.memory[LY] == 144 && ppu.cycles_into_line < 4 ? 4 : 456;
+            mode_boundary = (cpu.memory[LY] == 144 || ppu.on_line_153) && ppu.cycles_into_line < LINE_153_LY_DOTS
+                                ? LINE_153_LY_DOTS
+                                : 456;
         }
 
         const int step = std::min(cycles, mode_boundary - ppu.cycles_into_line);
@@ -796,6 +802,11 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         }
         else if (ppu.cycles_into_line < 456)
         {
+            if (ppu.on_line_153 && ppu.cycles_into_line == LINE_153_LY_DOTS)
+            {
+                cpu.memory[LY] = 0;
+                ppu.ly_for_comparison = 0;
+            }
             update_status(cpu, ppu, 1);
         }
         else
