@@ -2,6 +2,9 @@
 #include "PPU.h"
 
 #include <cassert>
+#include <vector>
+#include <string>
+#include <algorithm>
 
 static void test_ppu_modes_scanlines_and_background()
 {
@@ -286,10 +289,67 @@ static void test_mid_line_palette_change()
     assert(ppu.framebuffer[159] == 0xFFE0F8D0);
 }
 
+static void set_cgb_color(std::array<uint8_t, 64> &palette_ram, int palette, int index, uint16_t color)
+{
+    palette_ram[static_cast<std::size_t>(palette * 8 + index * 2)] = static_cast<uint8_t>(color);
+    palette_ram[static_cast<std::size_t>(palette * 8 + index * 2 + 1)] = static_cast<uint8_t>(color >> 8);
+}
+
+static void test_cgb_tile_attributes_objects_and_priority()
+{
+    std::vector<uint8_t> rom(0x8000, 0);
+    rom[0x0143] = 0xC0;
+    std::string error;
+    CPU_LR35902 cpu{};
+    assert(load_cartridge(cpu, std::move(rom), error, GameBoyModel::Cgb));
+    PPU_LR35902 ppu{};
+    cpu.ppu = &ppu;
+    std::fill(cpu.memory.begin() + 0x8000, cpu.memory.begin() + 0xA000, 0);
+    cpu.memory[0xFF40] = 0x93; // LCD, BG, and objects on; tile data at $8000
+    cpu.memory[0xFF42] = 0;
+    cpu.memory[0xFF43] = 0;
+
+    // Tile 1 in bank 1: row 0 has only its leftmost pixel set, in colour 1.
+    cpu.vram_bank1[0x10] = 0x80;
+    cpu.memory[0x9800] = 1;
+    cpu.vram_bank1[0x1800] = 0x08 | 0x20 | 0x02; // Bank 1, horizontal flip, palette 2
+    set_cgb_color(cpu.bg_palette_ram, 2, 0, 0x7FFF);  // White
+    set_cgb_color(cpu.bg_palette_ram, 2, 1, 0x001F);  // Red
+
+    // Tile 2 in bank 0 with background priority, colour 3 across the row.
+    cpu.memory[0x8020] = 0xFF;
+    cpu.memory[0x8021] = 0xFF;
+    cpu.memory[0x9801] = 2;
+    cpu.vram_bank1[0x1801] = 0x80 | 0x03; // Priority over objects, palette 3
+    set_cgb_color(cpu.bg_palette_ram, 3, 3, 0x03E0); // Green
+
+    // An object over both tiles from bank 1 with palette 5, colour 2.
+    cpu.vram_bank1[0x30] = 0x00;
+    cpu.vram_bank1[0x31] = 0xFF;
+    cpu.memory[0xFE00] = 16;
+    cpu.memory[0xFE01] = 8 + 4; // X 4-11
+    cpu.memory[0xFE02] = 3;
+    cpu.memory[0xFE03] = 0x08 | 0x05;
+    set_cgb_color(cpu.obj_palette_ram, 5, 2, 0x7C00); // Blue
+
+    update_ppu(cpu, ppu, 456);
+    assert(ppu.framebuffer[0] == 0xFFFFFFFF); // Flipped, so the set pixel is on the right
+    assert(ppu.framebuffer[3] == 0xFFFFFFFF);
+    assert(ppu.framebuffer[4] == 0xFF0000FF); // The object over colour 0
+    assert(ppu.framebuffer[7] == 0xFF0000FF); // The object over the flipped red pixel
+    assert(ppu.framebuffer[8] == 0xFF00FF00); // Background priority keeps the green tile in front
+
+    cpu.memory[0xFF40] = 0x92; // LCDC bit 0 clear: objects in front of everything
+    update_ppu(cpu, ppu, 154 * 456);
+    assert(ppu.framebuffer[8] == 0xFF0000FF);
+    assert(ppu.framebuffer[12] == 0xFF00FF00); // The background is still drawn
+}
+
 int main()
 {
     test_ppu_modes_scanlines_and_background();
     test_lcd_off_resets_ly();
+    test_cgb_tile_attributes_objects_and_priority();
     test_ppu_window_composition();
     test_ppu_sprite_priority_palettes_flips_and_8x16();
     test_stat_mode_interrupt_edges();

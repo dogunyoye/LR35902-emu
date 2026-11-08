@@ -44,14 +44,20 @@ struct PPU_State
     // then fetched again.
     bool fetch_first_tile = false;
     std::uint8_t fetch_tile_id = 0;
+    // CGB mode: the tile's attributes from VRAM bank 1 (palette, bank, flips,
+    // and priority over objects), kept with its pixels in the shifter.
+    std::uint8_t fetch_attributes = 0;
     std::uint8_t fetch_low = 0;
     std::uint8_t fetch_high = 0;
     std::uint8_t background_low = 0;
     std::uint8_t background_high = 0;
+    std::uint8_t background_attributes = 0;
     int background_count = 0;
-    // Object pixels waiting to be mixed, slot 0 being the next pixel.
+    // Object pixels waiting to be mixed, slot 0 being the next pixel, with
+    // the OAM index of the object each came from.
     std::array<std::uint8_t, 8> object_colors{};
     std::array<std::uint8_t, 8> object_attributes{};
+    std::array<std::uint8_t, 8> object_oam_indices{};
     int pixel_x = 0;
     // Pixels still to be shifted out left of the screen. Objects and the
     // window are matched against a position that counts these 8 pixels.
@@ -70,6 +76,7 @@ struct PPU_State
         std::uint8_t background_color;
         std::uint8_t object_color;
         std::uint8_t object_attributes;
+        std::uint8_t background_attributes;
     };
     std::array<PendingPixel, 4> pending_pixels{};
     int pending_count = 0;

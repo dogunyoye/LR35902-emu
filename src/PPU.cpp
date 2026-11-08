@@ -89,6 +89,29 @@ namespace
         ppu.stat_interrupt_line = stat_line;
     }
 
+    // CGB mode reads tiles from either VRAM bank.
+    std::uint8_t vram_byte(const CPU_LR35902 &cpu, bool bank1, std::uint16_t address)
+    {
+        return bank1 ? cpu.vram_bank1[address - VRAM_START] : cpu.memory[address];
+    }
+
+    std::uint8_t reverse_bits(std::uint8_t value)
+    {
+        value = static_cast<std::uint8_t>((value & 0xF0) >> 4 | (value & 0x0F) << 4);
+        value = static_cast<std::uint8_t>((value & 0xCC) >> 2 | (value & 0x33) << 2);
+        return static_cast<std::uint8_t>((value & 0xAA) >> 1 | (value & 0x55) << 1);
+    }
+
+    // A colour from CGB palette RAM: eight palettes of four little-endian
+    // RGB555 colours, each component widened to 8 bits.
+    std::uint32_t cgb_color(const std::array<std::uint8_t, 64> &palette_ram, int palette, int color_index)
+    {
+        const std::size_t offset = static_cast<std::size_t>(palette * 8 + color_index * 2);
+        const int color = palette_ram[offset] | (palette_ram[offset + 1] << 8);
+        const auto widen = [](int component) { return static_cast<std::uint32_t>((component << 3) | (component >> 2)); };
+        return 0xFF000000u | widen(color & 0x1F) << 16 | widen((color >> 5) & 0x1F) << 8 | widen((color >> 10) & 0x1F);
+    }
+
     std::uint32_t palette_color(const CPU_LR35902 &cpu, std::uint16_t palette_address, std::uint8_t color_index)
     {
         const std::uint8_t palette = cpu.memory[palette_address];
@@ -180,7 +203,15 @@ namespace
 
     int fetch_row(const CPU_LR35902 &cpu, const PPU_State &ppu)
     {
-        return ppu.fetch_window ? ppu.window_line & 0x07 : (cpu.memory[LY] + cpu.memory[SCY]) & 0x07;
+        const int row = ppu.fetch_window ? ppu.window_line & 0x07 : (cpu.memory[LY] + cpu.memory[SCY]) & 0x07;
+        return (ppu.fetch_attributes & 0x40) != 0 ? 7 - row : row; // CGB vertical flip
+    }
+
+    std::uint8_t fetch_tile_byte(const CPU_LR35902 &cpu, const PPU_State &ppu, int offset)
+    {
+        const std::uint16_t address =
+            static_cast<std::uint16_t>(tile_row_address(cpu, ppu.fetch_tile_id, fetch_row(cpu, ppu)) + offset);
+        return vram_byte(cpu, (ppu.fetch_attributes & 0x08) != 0, address);
     }
 
     // One dot of the background fetcher. Registers are read at the stage that
@@ -194,18 +225,21 @@ namespace
             ppu.fetch_window = false;
             ppu.window_active = false;
         }
+        std::uint16_t address;
         if (ppu.fetch_window)
         {
             const std::uint16_t map = (lcdc & 0x40) != 0 ? BG_MAP_1 : BG_MAP_0;
-            ppu.fetch_tile_id = cpu.memory[map + ((ppu.window_line / 8) & 0x1F) * 32 + (ppu.fetch_tile_x & 0x1F)];
+            address = static_cast<std::uint16_t>(map + ((ppu.window_line / 8) & 0x1F) * 32 + (ppu.fetch_tile_x & 0x1F));
         }
         else
         {
             const std::uint16_t map = (lcdc & 0x08) != 0 ? BG_MAP_1 : BG_MAP_0;
             const int column = ((cpu.memory[SCX] >> 3) + ppu.fetch_tile_x) & 0x1F;
             const int row = ((cpu.memory[LY] + cpu.memory[SCY]) & 0xFF) / 8;
-            ppu.fetch_tile_id = cpu.memory[map + row * 32 + column];
+            address = static_cast<std::uint16_t>(map + row * 32 + column);
         }
+        ppu.fetch_tile_id = cpu.memory[address];
+        ppu.fetch_attributes = cpu.cgb_mode ? cpu.vram_bank1[address - VRAM_START] : 0;
     }
 
     void advance_fetcher(const CPU_LR35902 &cpu, PPU_State &ppu)
@@ -230,24 +264,26 @@ namespace
         case 3:
             if (!ppu.window_index_late)
             {
-                ppu.fetch_low = cpu.memory[tile_row_address(cpu, ppu.fetch_tile_id, fetch_row(cpu, ppu))];
+                ppu.fetch_low = fetch_tile_byte(cpu, ppu, 0);
             }
             break;
         case 4:
             if (ppu.window_index_late)
             {
                 ppu.window_index_late = false;
-                ppu.fetch_low = cpu.memory[tile_row_address(cpu, ppu.fetch_tile_id, fetch_row(cpu, ppu))];
+                ppu.fetch_low = fetch_tile_byte(cpu, ppu, 0);
             }
             break;
         case 5:
-            ppu.fetch_high = cpu.memory[tile_row_address(cpu, ppu.fetch_tile_id, fetch_row(cpu, ppu)) + 1];
+            ppu.fetch_high = fetch_tile_byte(cpu, ppu, 1);
             break;
         case 6:
             if (ppu.background_count == 0)
             {
-                ppu.background_low = ppu.fetch_low;
-                ppu.background_high = ppu.fetch_high;
+                const bool flip = (ppu.fetch_attributes & 0x20) != 0; // CGB horizontal flip
+                ppu.background_low = flip ? reverse_bits(ppu.fetch_low) : ppu.fetch_low;
+                ppu.background_high = flip ? reverse_bits(ppu.fetch_high) : ppu.fetch_high;
+                ppu.background_attributes = ppu.fetch_attributes;
                 ppu.background_count = 8;
                 if (ppu.fetch_first_tile)
                 {
@@ -285,21 +321,40 @@ namespace
         }
         row &= 0x07;
         const std::uint16_t row_address = static_cast<std::uint16_t>(VRAM_START + tile * 16 + row * 2);
-        const std::uint8_t low = cpu.memory[row_address];
-        const std::uint8_t high = cpu.memory[row_address + 1];
+        const bool bank1 = cpu.cgb_mode && (attributes & 0x08) != 0;
+        const std::uint8_t low = vram_byte(cpu, bank1, row_address);
+        const std::uint8_t high = vram_byte(cpu, bank1, static_cast<std::uint16_t>(row_address + 1));
+        // Objects are fetched left to right. Earlier objects keep their opaque
+        // pixels, except that in CGB mode a lower OAM index wins.
+        const bool by_oam_index = cpu.cgb_mode && (cpu.object_priority_mode & 0x01) == 0;
 
         for (int column = 0; column < 8; ++column)
         {
             const int slot = object.x - 8 + column - ppu.pixel_x;
-            if (slot < 0 || slot >= 8 || ppu.object_colors[static_cast<std::size_t>(slot)] != 0)
+            if (slot < 0 || slot >= 8)
             {
-                continue; // Earlier objects keep their opaque pixels.
+                continue;
             }
+            const std::size_t index = static_cast<std::size_t>(slot);
             const int bit = (attributes & 0x20) != 0 ? column : 7 - column;
             const std::uint8_t color = static_cast<std::uint8_t>(((low >> bit) & 1) | (((high >> bit) & 1) << 1));
-            ppu.object_colors[static_cast<std::size_t>(slot)] = color;
-            ppu.object_attributes[static_cast<std::size_t>(slot)] = attributes;
+            if (ppu.object_colors[index] != 0 &&
+                (!by_oam_index || color == 0 || object.oam_index > ppu.object_oam_indices[index]))
+            {
+                continue;
+            }
+            ppu.object_colors[index] = color;
+            ppu.object_attributes[index] = attributes;
+            ppu.object_oam_indices[index] = object.oam_index;
         }
+    }
+
+    void shift_object_pixels(PPU_State &ppu)
+    {
+        std::copy(ppu.object_colors.begin() + 1, ppu.object_colors.end(), ppu.object_colors.begin());
+        std::copy(ppu.object_attributes.begin() + 1, ppu.object_attributes.end(), ppu.object_attributes.begin());
+        std::copy(ppu.object_oam_indices.begin() + 1, ppu.object_oam_indices.end(), ppu.object_oam_indices.begin());
+        ppu.object_colors[7] = 0;
     }
 
     // Pops the next pixel from the shifters. It is coloured two dots later.
@@ -324,10 +379,9 @@ namespace
         const std::uint8_t delay = ppu.first_pixel_delayed ? 3 : 2;
         ppu.first_pixel_delayed = false;
         const PPU_LR35902::PendingPixel pixel{true, delay, static_cast<std::uint8_t>(ppu.pixel_x), background_color,
-                                              ppu.object_colors[0], ppu.object_attributes[0]};
-        std::copy(ppu.object_colors.begin() + 1, ppu.object_colors.end(), ppu.object_colors.begin());
-        std::copy(ppu.object_attributes.begin() + 1, ppu.object_attributes.end(), ppu.object_attributes.begin());
-        ppu.object_colors[7] = 0;
+                                              ppu.object_colors[0], ppu.object_attributes[0],
+                                              ppu.background_attributes};
+        shift_object_pixels(ppu);
         ++ppu.pixel_x;
         return pixel;
     }
@@ -337,6 +391,25 @@ namespace
                        std::uint32_t *framebuffer)
     {
         const std::uint8_t lcdc = ppu.resolve_lcdc;
+        if (cpu.cgb_mode)
+        {
+            // LCDC bit 0 clear lets objects over the background regardless of
+            // priority bits; otherwise either priority bit puts the
+            // background's non-zero colours in front.
+            std::uint32_t color = cgb_color(cpu.bg_palette_ram, pixel.background_attributes & 0x07, pixel.background_color);
+            const bool background_in_front =
+                (lcdc & 0x01) != 0 && pixel.background_color != 0 &&
+                ((pixel.background_attributes & 0x80) != 0 || (pixel.object_attributes & 0x80) != 0);
+            if (pixel.object_color != 0 && (lcdc & 0x02) != 0 && !background_in_front)
+            {
+                color = cgb_color(cpu.obj_palette_ram, pixel.object_attributes & 0x07, pixel.object_color);
+            }
+            if (framebuffer != nullptr)
+            {
+                framebuffer[static_cast<std::size_t>(cpu.memory[LY]) * PPU_LR35902::WIDTH + pixel.x] = color;
+            }
+            return;
+        }
         const std::uint8_t visible_background = (lcdc & 0x01) != 0 ? pixel.background_color : 0;
         const std::uint8_t bgp = ppu.bgp_write_pending ? ppu.bgp_write_blend : cpu.memory[BGP];
         std::uint32_t color = shade_color(static_cast<std::uint8_t>((bgp >> (visible_background * 2)) & 0x03));
@@ -434,9 +507,7 @@ namespace
             ++last.x;
             last.object_color = ppu.object_colors[0];
             last.object_attributes = ppu.object_attributes[0];
-            std::copy(ppu.object_colors.begin() + 1, ppu.object_colors.end(), ppu.object_colors.begin());
-            std::copy(ppu.object_attributes.begin() + 1, ppu.object_attributes.end(), ppu.object_attributes.begin());
-            ppu.object_colors[7] = 0;
+            shift_object_pixels(ppu);
             ppu.pending_pixels[static_cast<std::size_t>(ppu.pending_count)] = last;
             last = inserted;
             ++ppu.pending_count;

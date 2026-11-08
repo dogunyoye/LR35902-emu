@@ -1,9 +1,10 @@
-"""Compare a rom_test_runner screenshot with a DMG reference image.
+"""Compare a rom_test_runner screenshot with a reference image.
 
-Usage: compare_screenshot.py SCREENSHOT.ppm REFERENCE.png
-Used for dmg-acid2 and the Mealybug Tearoom tests. Pixels are compared by
-shade: the screenshot uses the emulator's palette and the references use
-greys. Exits 0 when every pixel matches. Requires Pillow.
+Usage: compare_screenshot.py [--rgb] SCREENSHOT.ppm REFERENCE.png
+Used for dmg-acid2, cgb-acid2, and the Mealybug Tearoom tests. By default
+pixels are compared by shade: the screenshot uses the emulator's DMG palette
+and the references use greys. With --rgb, for Game Boy Color references,
+colours must match exactly. Exits 0 when every pixel matches. Requires Pillow.
 """
 import sys
 
@@ -19,11 +20,22 @@ def shades(path, palette):
     return [palette.get(tuple(data[i:i + 3]), -1) for i in range(0, len(data), 3)]
 
 
+def colors(path):
+    data = Image.open(path).convert("RGB").tobytes()
+    return [tuple(data[i:i + 3]) for i in range(0, len(data), 3)]
+
+
 def main():
-    shot = shades(sys.argv[1], EMULATOR_SHADES)
-    reference = shades(sys.argv[2], REFERENCE_SHADES)
-    # Colours outside either palette (-1) never match.
-    mismatches = [index for index, (a, b) in enumerate(zip(shot, reference)) if a != b or a < 0]
+    # --rgb compares exact colours, for Game Boy Color references.
+    args = sys.argv[1:]
+    if args[0] == "--rgb":
+        shot, reference = colors(args[1]), colors(args[2])
+        mismatches = [index for index, (a, b) in enumerate(zip(shot, reference)) if a != b]
+    else:
+        shot = shades(args[0], EMULATOR_SHADES)
+        reference = shades(args[1], REFERENCE_SHADES)
+        # Colours outside either palette (-1) never match.
+        mismatches = [index for index, (a, b) in enumerate(zip(shot, reference)) if a != b or a < 0]
     if mismatches or len(shot) != len(reference):
         first = mismatches[0] if mismatches else 0
         print(f"{len(mismatches)} pixels differ; first at x={first % 160} y={first // 160}")
