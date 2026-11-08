@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,7 +19,8 @@ namespace
     void print_usage(const char *program_name)
     {
         std::cerr << "Usage: " << program_name
-                  << " [--screenshot PPM_PATH] ROM_PATH [MAX_CYCLES] [dmg0|dmgABC|mgb|sgb|sgb2]\n"
+                  << " [--screenshot PPM_PATH] ROM_PATH [MAX_CYCLES] [auto|dmg0|dmgABC|mgb|sgb|sgb2|cgb0|cgb|agb]\n"
+                  << "The model defaults to auto: CGB for cartridges that only run on the Game Boy Color, otherwise DMG.\n"
                   << "Runs a serial-reporting ROM test. Exit status: 0=Passed, 1=Failed, 2=no result.\n"
                   << "With --screenshot, the frame is saved when the ROM executes LD B,B or the cycle\n"
                   << "limit is reached, for screenshot tests such as dmg-acid2.\n";
@@ -31,10 +33,27 @@ namespace
         return result.ec == std::errc{} && result.ptr == value.data() + value.size() && cycle_limit > 0;
     }
 
-    bool parse_model(const char *text, GameBoyModel &model)
+    // "auto" leaves the model unset, to be chosen from the cartridge header.
+    bool parse_model(const char *text, std::optional<GameBoyModel> &model)
     {
         const std::string value(text);
-        if (value == "dmg0")
+        if (value == "auto")
+        {
+            model.reset();
+        }
+        else if (value == "cgb0")
+        {
+            model = GameBoyModel::Cgb0;
+        }
+        else if (value == "cgb")
+        {
+            model = GameBoyModel::Cgb;
+        }
+        else if (value == "agb")
+        {
+            model = GameBoyModel::Agb;
+        }
+        else if (value == "dmg0")
         {
             model = GameBoyModel::Dmg0;
         }
@@ -152,17 +171,17 @@ int main(int argc, char **argv)
     }
 
     std::uint64_t cycle_limit = DEFAULT_MAX_CYCLES;
-    GameBoyModel model = GameBoyModel::DmgABC;
+    std::optional<GameBoyModel> requested_model;
     if (argc >= 3 && !parse_cycle_limit(argv[2], cycle_limit))
     {
-        if (argc != 3 || !parse_model(argv[2], model))
+        if (argc != 3 || !parse_model(argv[2], requested_model))
         {
             std::cerr << "Invalid cycle limit or model.\n";
             print_usage(argv[0]);
             return 2;
         }
     }
-    if (argc == 4 && !parse_model(argv[3], model))
+    if (argc == 4 && !parse_model(argv[3], requested_model))
     {
         std::cerr << "Invalid model.\n";
         print_usage(argv[0]);
@@ -178,6 +197,9 @@ int main(int argc, char **argv)
     }
 
     std::vector<std::uint8_t> rom((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    // Test ROMs that also run on the DMG are tested on the DMG unless asked.
+    const bool cgb_only = rom.size() > 0x143 && (rom[0x143] & 0xC0) == 0xC0;
+    const GameBoyModel model = requested_model.value_or(cgb_only ? GameBoyModel::Cgb : GameBoyModel::DmgABC);
     CPU_LR35902 cpu{};
     std::string error;
     if (!load_cartridge(cpu, std::move(rom), error, model))

@@ -104,8 +104,10 @@ struct PPU_LR35902 : PPU_State
 };
 
 void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles);
-// Whether a CPU write landing now is blocked by the PPU.
-bool ppu_blocks_vram_write(const PPU_LR35902 &ppu);
-bool ppu_blocks_oam_write(const PPU_LR35902 &ppu);
+// Whether a CPU write landing now is blocked by the PPU. Writes land at the
+// start of their M-cycle, this many dots (4, or 2 in double speed) before the
+// PPU state that blocks them.
+bool ppu_blocks_vram_write(const PPU_LR35902 &ppu, int write_lead = 4);
+bool ppu_blocks_oam_write(const PPU_LR35902 &ppu, int write_lead = 4);
 // The 8-byte OAM row the OAM scan is reading, or -1 outside the scan.
 int ppu_oam_scan_row(const CPU_LR35902 &cpu, const PPU_LR35902 &ppu);

@@ -2,6 +2,8 @@
 #include "PPU.h"
 
 #include <cassert>
+#include <string>
+#include <vector>
 
 static void test_unusable_oam_region()
 {
@@ -121,6 +123,96 @@ static void test_oam_corruption()
     assert(cpu.memory[0xFE18] == static_cast<uint8_t>(0x18 * 7 + 3));
 }
 
+static std::vector<uint8_t> make_cgb_rom()
+{
+    std::vector<uint8_t> rom(0x8000, 0);
+    rom[0x0143] = 0xC0; // Game Boy Color only
+    return rom;
+}
+
+static void test_cgb_banks_and_palettes()
+{
+    std::string error;
+    CPU_LR35902 cpu{};
+    assert(load_cartridge(cpu, make_cgb_rom(), error, GameBoyModel::Cgb));
+    assert(cpu.cgb_hardware && cpu.cgb_mode);
+    assert(cpu.af.reg8.high == 0x11);
+
+    cpu_write(cpu, 0x8000, 0x11);
+    cpu_write(cpu, 0xFF4F, 0x01);
+    assert(cpu_read(cpu, 0xFF4F) == 0xFF);
+    cpu_write(cpu, 0x8000, 0x22);
+    assert(cpu.vram_bank1[0] == 0x22 && cpu.memory[0x8000] == 0x11);
+    cpu_write(cpu, 0xFF4F, 0x00);
+    assert(cpu_read(cpu, 0x8000) == 0x11);
+
+    cpu_write(cpu, 0xD000, 0x01); // Bank 1 (SVBK 0 also selects bank 1)
+    cpu_write(cpu, 0xFF70, 0x05);
+    assert(cpu_read(cpu, 0xFF70) == 0xFD);
+    cpu_write(cpu, 0xD000, 0x05);
+    assert(cpu_read(cpu, 0xF000) == 0x05); // Echo RAM follows the bank
+    cpu_write(cpu, 0xFF70, 0x00);
+    assert(cpu_read(cpu, 0xD000) == 0x01);
+    assert(cpu_read(cpu, 0xC000) == cpu.memory[0xC000]);
+
+    cpu_write(cpu, 0xFF68, 0x80 | 0x3F); // Auto-increment wraps after the last byte
+    cpu_write(cpu, 0xFF69, 0xAB);
+    cpu_write(cpu, 0xFF69, 0xCD);
+    assert(cpu.bg_palette_ram[0x3F] == 0xAB && cpu.bg_palette_ram[0x00] == 0xCD);
+    assert(cpu_read(cpu, 0xFF68) == 0xC1);
+    cpu_write(cpu, 0xFF68, 0x00);
+    assert(cpu_read(cpu, 0xFF69) == 0xCD);
+}
+
+static void test_cgb_speed_switch_and_dma()
+{
+    std::string error;
+    CPU_LR35902 cpu{};
+    std::vector<uint8_t> rom = make_cgb_rom();
+    rom[0x0100] = 0x10; // STOP
+    rom[0x0101] = 0x00;
+    for (int index = 0; index < 0x20; ++index)
+    {
+        rom[0x4000 + index] = static_cast<uint8_t>(index + 1);
+    }
+    assert(load_cartridge(cpu, std::move(rom), error, GameBoyModel::Cgb));
+
+    assert(cpu_read(cpu, 0xFF4D) == 0x7E);
+    cpu_write(cpu, 0xFF4D, 0x01);
+    execute_instruction(cpu);
+    assert(cpu.double_speed && !cpu.stopped);
+    assert(cpu_read(cpu, 0xFF4D) == 0xFE);
+
+    cpu_write(cpu, 0xFF51, 0x40); // From $4000
+    cpu_write(cpu, 0xFF52, 0x00);
+    cpu_write(cpu, 0xFF53, 0x01); // To $8100
+    cpu_write(cpu, 0xFF54, 0x00);
+    cpu_write(cpu, 0xFF55, 0x01); // Two blocks, straight away
+    assert(cpu.memory[0x8100] == 0x01 && cpu.memory[0x811F] == 0x20);
+    assert(cpu_read(cpu, 0xFF55) == 0xFF);
+    assert(cpu.hdma_stall_cycles == 32); // Eight M-cycles per block, doubled in double speed
+
+    cpu_write(cpu, 0xFF55, 0x80); // One block per HBlank
+    assert(cpu_read(cpu, 0xFF55) == 0x00);
+    cpu_hblank_started(cpu);
+    assert(cpu_read(cpu, 0xFF55) == 0xFF && !cpu.hdma_hblank_active);
+}
+
+static void test_cgb_registers_in_dmg_mode()
+{
+    std::string error;
+    CPU_LR35902 cpu{};
+    std::vector<uint8_t> rom(0x8000, 0); // Not made for the Game Boy Color
+    assert(load_cartridge(cpu, std::move(rom), error, GameBoyModel::Cgb));
+    assert(cpu.cgb_hardware && !cpu.cgb_mode);
+    cpu_write(cpu, 0xFF4F, 0x01);
+    cpu_write(cpu, 0xFF70, 0x03);
+    assert(cpu_read(cpu, 0xFF4F) == 0xFE); // VBK stays bank 0
+    assert(cpu_read(cpu, 0xFF70) == 0xFF);
+    assert(cpu_read(cpu, 0xFF4D) == 0xFF);
+    assert(cpu_read(cpu, 0xFF68) == 0xC8);
+}
+
 int main()
 {
     test_unusable_oam_region();
@@ -129,5 +221,8 @@ int main()
     test_oam_dma_transfer_and_bus_lock();
     test_oam_dma_fe_source_uses_echo_bus();
     test_oam_corruption();
+    test_cgb_banks_and_palettes();
+    test_cgb_speed_switch_and_dma();
+    test_cgb_registers_in_dmg_mode();
     return 0;
 }

@@ -185,7 +185,7 @@ namespace
             channel.timer = square_period(channel);
             break;
         case 2:
-            if (channel.enabled_before_trigger && channel.timer <= WAVE_TRIGGER_CORRUPTION_WINDOW)
+            if (!apu.cgb && channel.enabled_before_trigger && channel.timer <= WAVE_TRIGGER_CORRUPTION_WINDOW)
             {
                 // On the DMG, retriggering just as a sample is read overwrites
                 // the start of wave RAM with the bytes being read.
@@ -273,7 +273,7 @@ namespace
         std::array<int, 4> lengths{};
         for (std::size_t index = 0; index < apu.channels.size(); ++index)
         {
-            lengths[index] = apu.channels[index].length;
+            lengths[index] = apu.cgb ? 0 : apu.channels[index].length;
         }
         apu.channels = {};
         for (std::size_t index = 0; index < apu.channels.size(); ++index)
@@ -394,9 +394,9 @@ uint8_t apu_read(const APU_LR35902 &apu, uint16_t address)
         const APU_LR35902::Channel &wave = apu.channels[2];
         if (wave.enabled)
         {
-            // While playing, the CPU only reaches wave RAM if the channel reads
-            // it on the same T-cycle, and then sees the byte being read.
-            return wave.wave_read_cycles == 0 ? apu.wave_ram[wave.wave_position / 2] : 0xFF;
+            // While playing, the CPU sees the byte the channel is reading. On
+            // the DMG it only reaches wave RAM on the T-cycle the channel reads it.
+            return apu.cgb || wave.wave_read_cycles == 0 ? apu.wave_ram[wave.wave_position / 2] : 0xFF;
         }
         return apu.wave_ram[static_cast<std::size_t>(address - WAVE_RAM_START)];
     }
@@ -425,7 +425,7 @@ void apu_write(APU_LR35902 &apu, uint16_t address, uint8_t value)
         {
             apu.wave_ram[static_cast<std::size_t>(address - WAVE_RAM_START)] = value;
         }
-        else if (wave.wave_read_cycles == 0)
+        else if (apu.cgb || wave.wave_read_cycles == 0)
         {
             apu.wave_ram[wave.wave_position / 2] = value;
         }
@@ -448,7 +448,12 @@ void apu_write(APU_LR35902 &apu, uint16_t address, uint8_t value)
 
     if (!apu.powered)
     {
-        // Only the length counters can be written while powered off.
+        // Only the length counters can be written while powered off, and only
+        // on the DMG.
+        if (apu.cgb)
+        {
+            return;
+        }
         switch (address)
         {
         case 0xFF11:

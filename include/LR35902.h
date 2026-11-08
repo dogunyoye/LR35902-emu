@@ -122,6 +122,40 @@ struct CPU_LR35902
     std::vector<uint8_t> cartridge_ram;
     std::string serial_output;
 
+    // Game Boy Color. A CGB runs cartridges not made for it in a DMG
+    // compatibility mode; the CGB features below are only available to
+    // cartridges that run in CGB mode.
+    bool cgb_hardware = false;
+    bool cgb_mode = false;
+    // KEY1: double speed runs the CPU, timers, serial port, and OAM DMA twice
+    // as fast; STOP switches speed once armed.
+    bool double_speed = false;
+    bool speed_switch_armed = false;
+    // VBK and SVBK. VRAM bank 0 and WRAM banks 0 and 1 live in memory.
+    uint8_t vram_bank = 0;
+    uint8_t wram_bank = 1;
+    std::array<uint8_t, 0x2000> vram_bank1{};
+    std::array<uint8_t, 0x6000> wram_banks{}; // Banks 2-7
+    // Colour palette RAM (eight palettes of four RGB555 colours each) and the
+    // BCPS/OCPS index registers (bit 7: increment after each write).
+    std::array<uint8_t, 64> bg_palette_ram{};
+    std::array<uint8_t, 64> obj_palette_ram{};
+    uint8_t bg_palette_index = 0;
+    uint8_t obj_palette_index = 0;
+    // OPRI bit 0: objects take priority by X position (DMG) rather than by
+    // OAM index.
+    uint8_t object_priority_mode = 0;
+    uint8_t infrared = 0;
+    // Undocumented registers $FF72-$FF75.
+    std::array<uint8_t, 4> undocumented_registers{};
+    // VRAM DMA: source, destination, 16-byte blocks still to copy, whether
+    // copying a block each HBlank, and M-cycles the CPU is held for.
+    uint16_t hdma_source = 0;
+    uint16_t hdma_destination = 0;
+    uint8_t hdma_blocks = 0;
+    bool hdma_hblank_active = false;
+    int hdma_stall_cycles = 0;
+
     // Backing store for VRAM, WRAM, OAM, I/O registers, HRAM, and IE (and ROM when
     // no cartridge is loaded). Access goes through cpu_read/cpu_write, which handle
     // cartridge banking, echo RAM, register masks, and PPU/DMA lockouts.
@@ -134,7 +168,10 @@ enum class GameBoyModel : uint8_t
     DmgABC,
     Mgb,
     Sgb,
-    Sgb2
+    Sgb2,
+    Cgb0,
+    Cgb,
+    Agb
 };
 
 enum class JoypadButton : uint8_t
@@ -184,6 +221,8 @@ uint16_t cpu_pop16(CPU_LR35902 &cpu);
 void update_timers(CPU_LR35902 &cpu, int cycles);
 void update_oam_dma(CPU_LR35902 &cpu, int cycles);
 void tick_peripherals(CPU_LR35902 &cpu, int cycles);
+// Called as the PPU enters HBlank on a visible line, for the CGB's HBlank VRAM DMA.
+void cpu_hblank_started(CPU_LR35902 &cpu);
 // The DMG corrupts OAM when the CPU puts an address in $FE00-$FEFF on the bus
 // while the PPU is scanning OAM. IncrementRead is the extra corruption of a
 // read that also increments the address (POP, LD A,(HL+), LD A,(HL-)); the

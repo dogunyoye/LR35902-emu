@@ -23,6 +23,8 @@ namespace
     // Dot within a line at which STAT reports mode 3. Lines are timed from the
     // dot LY changes, so these include the four dots before mode 2 is reported.
     constexpr int MODE3_START = 81;
+    // Dot on line 143 at which the CGB raises line 144's mode 2 STAT interrupt.
+    constexpr int CGB_LINE_144_STAT_DOT = 452;
     constexpr int STARTUP_MODE3_START = 83;
     // How far ahead the end of mode 3 must be known: writes are checked four
     // dots ahead and the STAT interrupt one dot beyond that.
@@ -421,7 +423,7 @@ namespace
         // If WX matches the last pixel to leave the pipeline while the window
         // is drawing, as a window tile fetch starts, the DMG inserts an extra
         // colour 0 pixel there, pushing the background one pixel right.
-        if (ppu.window_active && ppu.fetch_window && fetch_step == 0 && ppu.stall_dots == 0 &&
+        if (!cpu.cgb_hardware && ppu.window_active && ppu.fetch_window && fetch_step == 0 && ppu.stall_dots == 0 &&
             ppu.pending_count > 0 && (lcdc & 0x20) != 0 && ppu.pixel_x + 6 == cpu.memory[WX] &&
             ppu.pixel_x - 1 != ppu.window_start_x)
         {
@@ -531,7 +533,9 @@ namespace
         if (ly == 144)
         {
             cpu.memory[0xFF0F] |= 0x01;
-            if ((cpu.memory[STAT] & 0x20) != 0)
+            // With the mode 2 STAT interrupt enabled, line 144 raises it too;
+            // the CGB raises it an M-cycle before the VBlank interrupt.
+            if ((cpu.memory[STAT] & 0x20) != 0 && !cpu.cgb_hardware)
             {
                 cpu.memory[0xFF0F] |= 0x02;
             }
@@ -639,6 +643,10 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
             {
                 mode_boundary = 4;
             }
+            else if (cpu.cgb_hardware && cpu.memory[LY] == 143 && ppu.cycles_into_line < CGB_LINE_144_STAT_DOT)
+            {
+                mode_boundary = CGB_LINE_144_STAT_DOT;
+            }
             else
             {
                 mode_boundary = 456;
@@ -677,7 +685,15 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
         else if (ppu.mode == 3)
         {
             update_mode3_end(cpu, ppu);
-            update_status(cpu, ppu, ppu.cycles_into_line < ppu.mode3_end ? 3 : 0);
+            if (ppu.cycles_into_line < ppu.mode3_end)
+            {
+                update_status(cpu, ppu, 3);
+            }
+            else
+            {
+                update_status(cpu, ppu, 0);
+                cpu_hblank_started(cpu);
+            }
         }
         else if (ppu.mode == 0)
         {
@@ -692,6 +708,13 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
                 ppu.line_start_hold = false;
                 ppu.ly_for_comparison = cpu.memory[LY];
                 update_status(cpu, ppu, 2);
+            }
+            else if (ppu.cycles_into_line == CGB_LINE_144_STAT_DOT && cpu.cgb_hardware)
+            {
+                if ((cpu.memory[STAT] & 0x20) != 0)
+                {
+                    cpu.memory[0xFF0F] |= 0x02;
+                }
             }
             else
             {
@@ -713,10 +736,9 @@ void update_ppu(CPU_LR35902 &cpu, PPU_LR35902 &ppu, int cycles)
 // that blocks them. VRAM writes are blocked while mode 3 is drawing. OAM writes
 // are blocked during mode 2 and mode 3, except for the four dots before mode 3
 // starts and the first four dots of each line.
-bool ppu_blocks_vram_write(const PPU_LR35902 &ppu)
+bool ppu_blocks_vram_write(const PPU_LR35902 &ppu, int write_lead)
 {
-    constexpr int WRITE_LEAD = 4;
-    const int dot = ppu.cycles_into_line + WRITE_LEAD;
+    const int dot = ppu.cycles_into_line + write_lead;
     if (!ppu.lcd_enabled)
     {
         return false;
@@ -734,10 +756,9 @@ bool ppu_blocks_vram_write(const PPU_LR35902 &ppu)
     }
 }
 
-bool ppu_blocks_oam_write(const PPU_LR35902 &ppu)
+bool ppu_blocks_oam_write(const PPU_LR35902 &ppu, int write_lead)
 {
-    constexpr int WRITE_LEAD = 4;
-    const int dot = ppu.cycles_into_line + WRITE_LEAD;
+    const int dot = ppu.cycles_into_line + write_lead;
     if (!ppu.lcd_enabled)
     {
         return false;

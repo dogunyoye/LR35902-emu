@@ -540,7 +540,17 @@ int execute_instruction(CPU_LR35902 &cpu)
 
     case 0x10: // STOP, followed by a padding byte
         cpu.pc++;
-        cpu.stopped = true;
+        if (cpu.cgb_mode && cpu.speed_switch_armed)
+        {
+            // Switches between normal and double speed instead of stopping.
+            cpu.double_speed = !cpu.double_speed;
+            cpu.speed_switch_armed = false;
+            reset_divider(cpu);
+        }
+        else
+        {
+            cpu.stopped = true;
+        }
         cycles = 4;
         break;
 
@@ -1545,6 +1555,14 @@ int step_cpu(CPU_LR35902 &cpu)
         // The system clock is stopped; only the cartridge's RTC keeps time.
         update_cartridge_rtc(cpu, 4);
         apu_tick_stopped(cpu.apu, 4);
+        return 4;
+    }
+
+    if (cpu.hdma_stall_cycles > 0)
+    {
+        // A VRAM DMA holds the CPU while it copies.
+        --cpu.hdma_stall_cycles;
+        tick_peripherals(cpu, 4);
         return 4;
     }
 

@@ -35,6 +35,9 @@ struct APU_LR35902
     };
 
     std::array<Channel, 4> channels{};
+    // The CGB clears length counters on power off and lets wave RAM be read
+    // while channel 3 plays.
+    bool cgb = false;
     // Raw register values for $FF10-$FF2F, and wave RAM at $FF30-$FF3F.
     std::array<uint8_t, 0x20> registers{};
     std::array<uint8_t, 0x10> wave_ram{};

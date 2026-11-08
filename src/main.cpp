@@ -133,7 +133,9 @@ namespace
         }
 
         std::vector<uint8_t> rom((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        return load_cartridge(cpu, std::move(rom), error);
+        // Cartridges made for the Game Boy Color run on a CGB, others on a DMG.
+        const bool cgb_cartridge = rom.size() > 0x143 && (rom[0x143] & 0x80) != 0;
+        return load_cartridge(cpu, std::move(rom), error, cgb_cartridge ? GameBoyModel::Cgb : GameBoyModel::DmgABC);
     }
 
     // Reads key bindings from the given controls file, or from controls.cfg in
@@ -464,7 +466,8 @@ int main(int argc, char **argv)
     {
         while (cycle_accumulator < CYCLES_PER_FRAME)
         {
-            cycle_accumulator += step_cpu(cpu);
+            const int cycles = step_cpu(cpu);
+            cycle_accumulator += cpu.double_speed ? cycles / 2 : cycles; // Frames are counted in PPU dots.
         }
         cycle_accumulator -= CYCLES_PER_FRAME;
 

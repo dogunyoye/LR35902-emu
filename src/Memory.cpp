@@ -22,13 +22,97 @@ namespace
 {
     uint8_t cpu_read_unrestricted(CPU_LR35902 &cpu, uint16_t address);
 
-    bool is_unmapped_dmg_io(uint16_t address)
+    // $FF4C-$FF7F hold the CGB's registers, handled by read_cgb_register.
+    bool is_unmapped_io(const CPU_LR35902 &cpu, uint16_t address)
     {
         return address == 0xFF03 || (address >= 0xFF08 && address <= 0xFF0E) ||
                address == 0xFF15 || address == 0xFF1F ||
                (address >= 0xFF27 && address <= 0xFF29) ||
-               (address >= 0xFF4C && address <= 0xFF7F);
+               (address >= 0xFF4C && address <= 0xFF7F && !cpu.cgb_hardware);
     }
+
+    // Where a VRAM or WRAM address lands, given the CGB bank registers.
+    uint8_t &banked_byte(CPU_LR35902 &cpu, uint16_t address)
+    {
+        if (cpu.cgb_mode && cpu.vram_bank == 1 && address >= VRAM_START && address <= VRAM_END)
+        {
+            return cpu.vram_bank1[address - VRAM_START];
+        }
+        if (cpu.cgb_mode && cpu.wram_bank >= 2 && address >= 0xD000 && address <= 0xDFFF)
+        {
+            return cpu.wram_banks[static_cast<std::size_t>(cpu.wram_bank - 2) * 0x1000 + (address - 0xD000)];
+        }
+        return cpu.memory[address];
+    }
+
+    // Palette RAM cannot be reached while the PPU draws.
+    bool palette_ram_accessible(const CPU_LR35902 &cpu)
+    {
+        return cpu.ppu == nullptr || cpu.ppu->mode != 3 || !cpu.ppu->lcd_enabled;
+    }
+
+    uint8_t read_palette(const CPU_LR35902 &cpu, const std::array<uint8_t, 64> &ram, uint8_t index)
+    {
+        return palette_ram_accessible(cpu) ? ram[index & 0x3F] : 0xFF;
+    }
+
+    void write_palette(const CPU_LR35902 &cpu, std::array<uint8_t, 64> &ram, uint8_t &index, uint8_t value)
+    {
+        if (palette_ram_accessible(cpu))
+        {
+            ram[index & 0x3F] = value;
+        }
+        if ((index & 0x80) != 0)
+        {
+            index = static_cast<uint8_t>(0x80 | ((index + 1) & 0x3F)); // Even if the write was blocked.
+        }
+    }
+
+    // Reads of $FF4C-$FF7F on CGB hardware. Most registers only exist in CGB
+    // mode; the rest read $FF.
+    uint8_t read_cgb_register(const CPU_LR35902 &cpu, uint16_t address)
+    {
+        const bool cgb = cpu.cgb_mode;
+        switch (address)
+        {
+        case 0xFF4D:
+            return cgb ? static_cast<uint8_t>(0x7E | (cpu.double_speed ? 0x80 : 0) | (cpu.speed_switch_armed ? 1 : 0))
+                       : 0xFF;
+        case 0xFF4F:
+            return static_cast<uint8_t>(0xFE | cpu.vram_bank);
+        case 0xFF55:
+            // Blocks left minus one, with bit 7 clear while an HBlank copy runs.
+            return cgb ? static_cast<uint8_t>((cpu.hdma_hblank_active ? 0x00 : 0x80) | ((cpu.hdma_blocks - 1) & 0x7F))
+                       : 0xFF;
+        case 0xFF56:
+            return cgb ? static_cast<uint8_t>((cpu.infrared & 0xC1) | 0x3E) : 0xFF; // No infrared light.
+        case 0xFF68:
+            return static_cast<uint8_t>(cpu.bg_palette_index | 0x40);
+        case 0xFF69:
+            return cgb ? read_palette(cpu, cpu.bg_palette_ram, cpu.bg_palette_index) : 0xFF;
+        case 0xFF6A:
+            return static_cast<uint8_t>(cpu.obj_palette_index | 0x40);
+        case 0xFF6B:
+            return cgb ? read_palette(cpu, cpu.obj_palette_ram, cpu.obj_palette_index) : 0xFF;
+        case 0xFF6C:
+            return cgb ? static_cast<uint8_t>(0xFE | cpu.object_priority_mode) : 0xFF;
+        case 0xFF70:
+            return cgb ? static_cast<uint8_t>(0xF8 | cpu.wram_bank) : 0xFF;
+        case 0xFF72:
+        case 0xFF73:
+            return cpu.undocumented_registers[address - 0xFF72];
+        case 0xFF74:
+            return cgb ? cpu.undocumented_registers[2] : 0xFF;
+        case 0xFF75:
+            return static_cast<uint8_t>(0x8F | (cpu.undocumented_registers[3] & 0x70));
+        case 0xFF76:
+        case 0xFF77:
+            return 0x00; // PCM12 and PCM34; channel output is not exposed.
+        default:
+            return 0xFF;
+        }
+    }
+
 
     uint8_t read_cartridge_rom(const CPU_LR35902 &cpu, uint16_t address)
     {
@@ -402,6 +486,11 @@ namespace
         return apu_read(cpu.apu, address);
     }
 
+    if (address >= 0xFF4C && address <= 0xFF7F && cpu.cgb_hardware)
+    {
+        return read_cgb_register(cpu, address);
+    }
+
     if (address >= VRAM_START && address <= VRAM_END && cpu.vram_locked)
     {
         return 0xFF;
@@ -417,7 +506,7 @@ namespace
         return 0xFF;
     }
 
-    return cpu.memory[address];
+    return banked_byte(cpu, address);
 }
 }
 
@@ -449,9 +538,9 @@ namespace
 // first row is never corrupted.
 void cpu_corrupt_oam(CPU_LR35902 &cpu, uint16_t address, OamCorruption corruption)
 {
-    if (address < 0xFE00 || address > 0xFEFF || !cpu.bus_ticking || cpu.ppu == nullptr)
+    if (address < 0xFE00 || address > 0xFEFF || !cpu.bus_ticking || cpu.ppu == nullptr || cpu.cgb_hardware)
     {
-        return;
+        return; // The CGB does not have the bug.
     }
     const int row = ppu_oam_scan_row(cpu, *cpu.ppu);
     if (row < 1)
@@ -489,7 +578,7 @@ uint8_t cpu_read(CPU_LR35902 &cpu, uint16_t address)
     {
         tick_peripherals(cpu, 4); // Reads sample the bus at the end of their M-cycle.
     }
-    if (is_unmapped_dmg_io(address))
+    if (is_unmapped_io(cpu, address))
     {
         return 0xFF;
     }
@@ -544,20 +633,28 @@ void update_oam_dma(CPU_LR35902 &cpu, int cycles)
 
 namespace
 {
+    // In double speed the CPU, timers, serial port, and OAM DMA run twice as
+    // fast, while the PPU, APU, and cartridge clock keep their speed, so they
+    // see half the cycles.
+    int fixed_speed_cycles(const CPU_LR35902 &cpu, int cycles)
+    {
+        return cpu.double_speed ? cycles / 2 : cycles;
+    }
+
     void tick_cpu_side(CPU_LR35902 &cpu, int cycles)
     {
         update_timers(cpu, cycles);
         update_oam_dma(cpu, cycles);
         update_serial(cpu, cycles);
-        update_cartridge_rtc(cpu, cycles);
-        apu_tick(cpu.apu, cycles);
+        update_cartridge_rtc(cpu, fixed_speed_cycles(cpu, cycles));
+        apu_tick(cpu.apu, fixed_speed_cycles(cpu, cycles));
     }
 
     void tick_ppu(CPU_LR35902 &cpu, int cycles)
     {
         if (cpu.ppu != nullptr)
         {
-            update_ppu(cpu, *cpu.ppu, cycles);
+            update_ppu(cpu, *cpu.ppu, fixed_speed_cycles(cpu, cycles));
         }
     }
 }
@@ -574,9 +671,136 @@ void tick_peripherals(CPU_LR35902 &cpu, int cycles)
 
 namespace
 {
+    // Copies one 16-byte block of a VRAM DMA, holding the CPU for its length.
+    void copy_hdma_block(CPU_LR35902 &cpu)
+    {
+        for (int index = 0; index < 0x10; ++index)
+        {
+            const uint8_t value = cpu_read_unrestricted(cpu, static_cast<uint16_t>(cpu.hdma_source + index));
+            banked_byte(cpu, static_cast<uint16_t>(VRAM_START | ((cpu.hdma_destination + index) & 0x1FFF))) = value;
+        }
+        cpu.hdma_source = static_cast<uint16_t>(cpu.hdma_source + 0x10);
+        cpu.hdma_destination = static_cast<uint16_t>(VRAM_START | ((cpu.hdma_destination + 0x10) & 0x1FFF));
+        cpu.hdma_stall_cycles += cpu.double_speed ? 16 : 8;
+        --cpu.hdma_blocks;
+    }
+
+    void write_cgb_register(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
+    {
+        const bool cgb = cpu.cgb_mode;
+        switch (address)
+        {
+        case 0xFF4D:
+            if (cgb)
+            {
+                cpu.speed_switch_armed = (value & 0x01) != 0;
+            }
+            break;
+        case 0xFF4F:
+            if (cgb)
+            {
+                cpu.vram_bank = value & 0x01;
+            }
+            break;
+        case 0xFF51:
+            cpu.hdma_source = static_cast<uint16_t>((value << 8) | (cpu.hdma_source & 0x00F0));
+            break;
+        case 0xFF52:
+            cpu.hdma_source = static_cast<uint16_t>((cpu.hdma_source & 0xFF00) | (value & 0xF0));
+            break;
+        case 0xFF53:
+            cpu.hdma_destination =
+                static_cast<uint16_t>(VRAM_START | ((value & 0x1F) << 8) | (cpu.hdma_destination & 0x00F0));
+            break;
+        case 0xFF54:
+            cpu.hdma_destination = static_cast<uint16_t>((cpu.hdma_destination & 0xFF00) | (value & 0xF0));
+            break;
+        case 0xFF55:
+            if (!cgb)
+            {
+                break;
+            }
+            if (cpu.hdma_hblank_active && (value & 0x80) == 0)
+            {
+                cpu.hdma_hblank_active = false; // Stops the HBlank copy; FF55 then shows what was left.
+                break;
+            }
+            cpu.hdma_blocks = static_cast<uint8_t>((value & 0x7F) + 1);
+            if ((value & 0x80) != 0)
+            {
+                cpu.hdma_hblank_active = true;
+            }
+            else
+            {
+                while (cpu.hdma_blocks > 0)
+                {
+                    copy_hdma_block(cpu);
+                }
+            }
+            break;
+        case 0xFF56:
+            if (cgb)
+            {
+                cpu.infrared = value;
+            }
+            break;
+        case 0xFF68:
+            if (cgb)
+            {
+                cpu.bg_palette_index = value & 0xBF;
+            }
+            break;
+        case 0xFF69:
+            if (cgb)
+            {
+                write_palette(cpu, cpu.bg_palette_ram, cpu.bg_palette_index, value);
+            }
+            break;
+        case 0xFF6A:
+            if (cgb)
+            {
+                cpu.obj_palette_index = value & 0xBF;
+            }
+            break;
+        case 0xFF6B:
+            if (cgb)
+            {
+                write_palette(cpu, cpu.obj_palette_ram, cpu.obj_palette_index, value);
+            }
+            break;
+        case 0xFF6C:
+            if (cgb)
+            {
+                cpu.object_priority_mode = value & 0x01;
+            }
+            break;
+        case 0xFF70:
+            if (cgb)
+            {
+                cpu.wram_bank = value & 0x07;
+            }
+            break;
+        case 0xFF72:
+        case 0xFF73:
+            cpu.undocumented_registers[address - 0xFF72] = value;
+            break;
+        case 0xFF74:
+            if (cgb)
+            {
+                cpu.undocumented_registers[2] = value;
+            }
+            break;
+        case 0xFF75:
+            cpu.undocumented_registers[3] = value & 0x70;
+            break;
+        default:
+            break;
+        }
+    }
+
     void write_memory(CPU_LR35902 &cpu, uint16_t address, uint8_t value)
     {
-        if (is_unmapped_dmg_io(address))
+        if (is_unmapped_io(cpu, address))
         {
             return;
         }
@@ -599,7 +823,13 @@ namespace
             return;
         }
 
-        if (address == 0xFF47 && cpu.ppu != nullptr)
+        if (address >= 0xFF4C && address <= 0xFF7F && cpu.cgb_hardware)
+        {
+            write_cgb_register(cpu, address, value);
+            return;
+        }
+
+        if (address == 0xFF47 && cpu.ppu != nullptr && !cpu.cgb_hardware)
         {
             cpu.ppu->bgp_write_pending = true;
             cpu.ppu->bgp_write_blend = static_cast<uint8_t>(cpu.memory[address] | value);
@@ -853,13 +1083,13 @@ namespace
         }
 
         if (address >= VRAM_START && address <= VRAM_END && cpu.ppu != nullptr &&
-            ppu_blocks_vram_write(*cpu.ppu))
+            ppu_blocks_vram_write(*cpu.ppu, cpu.double_speed ? 2 : 4))
         {
             return;
         }
 
         if (address >= OAM_START && address <= OAM_END && cpu.ppu != nullptr &&
-            ppu_blocks_oam_write(*cpu.ppu))
+            ppu_blocks_oam_write(*cpu.ppu, cpu.double_speed ? 2 : 4))
         {
             return;
         }
@@ -875,7 +1105,16 @@ namespace
             address -= 0x2000;
         }
 
-        cpu.memory[address] = value;
+        banked_byte(cpu, address) = value;
+    }
+}
+
+void cpu_hblank_started(CPU_LR35902 &cpu)
+{
+    if (cpu.hdma_hblank_active)
+    {
+        copy_hdma_block(cpu);
+        cpu.hdma_hblank_active = cpu.hdma_blocks > 0;
     }
 }
 

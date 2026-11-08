@@ -10,7 +10,7 @@ namespace
 {
     constexpr char MAGIC[8] = {'L', 'R', '3', '5', '9', '0', '2', 'S'};
     // Bump whenever the saved fields or the PPU layout change.
-    constexpr uint32_t VERSION = 4;
+    constexpr uint32_t VERSION = 5;
 
     static_assert(std::is_trivially_copyable_v<PPU_LR35902>, "PPU state is saved as raw bytes");
     static_assert(std::is_trivially_copyable_v<APU_LR35902::Channel>, "APU channels are saved as raw bytes");
@@ -109,6 +109,7 @@ namespace
     void transfer_apu(Archive &archive, APU_LR35902 &apu)
     {
         archive(apu.channels);
+        archive(apu.cgb);
         archive(apu.registers);
         archive(apu.wave_ram);
         archive(apu.powered);
@@ -188,6 +189,26 @@ namespace
         archive(cpu.oam_locked);
         archive.bytes(cpu.cartridge_ram);
         archive(cpu.memory);
+        archive(cpu.cgb_hardware);
+        archive(cpu.cgb_mode);
+        archive(cpu.double_speed);
+        archive(cpu.speed_switch_armed);
+        archive(cpu.vram_bank);
+        archive(cpu.wram_bank);
+        archive(cpu.vram_bank1);
+        archive(cpu.wram_banks);
+        archive(cpu.bg_palette_ram);
+        archive(cpu.obj_palette_ram);
+        archive(cpu.bg_palette_index);
+        archive(cpu.obj_palette_index);
+        archive(cpu.object_priority_mode);
+        archive(cpu.infrared);
+        archive(cpu.undocumented_registers);
+        archive(cpu.hdma_source);
+        archive(cpu.hdma_destination);
+        archive(cpu.hdma_blocks);
+        archive(cpu.hdma_hblank_active);
+        archive(cpu.hdma_stall_cycles);
     }
 }
 

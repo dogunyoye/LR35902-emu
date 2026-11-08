@@ -13,6 +13,7 @@ namespace
     constexpr std::size_t CARTRIDGE_TYPE_ADDRESS = 0x0147;
     constexpr std::size_t ROM_SIZE_ADDRESS = 0x0148;
     constexpr std::size_t RAM_SIZE_ADDRESS = 0x0149;
+    constexpr std::size_t CGB_FLAG_ADDRESS = 0x0143;
     constexpr std::size_t LOGO_ADDRESS = 0x0104;
     constexpr std::array<uint8_t, 0x30> NINTENDO_LOGO = {
         0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83,
@@ -246,6 +247,8 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     }
 
     const bool mbc1_multicart = mbc1 && is_mbc1_multicart(rom);
+    const bool cgb_hardware = model == GameBoyModel::Cgb0 || model == GameBoyModel::Cgb || model == GameBoyModel::Agb;
+    const bool cgb_cartridge = (rom[CGB_FLAG_ADDRESS] & 0x80) != 0;
     cpu = CPU_LR35902{};
     cpu.cartridge_rom = std::move(rom);
     cpu.cartridge_mbc1 = mbc1;
@@ -282,7 +285,8 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
     cpu.memory[0xFF50] = 0xFF;
     const bool sgb = model == GameBoyModel::Sgb || model == GameBoyModel::Sgb2;
     apu_power_on_after_boot(cpu.apu, !sgb); // The SGB boot ROM plays no chime.
-    if (!sgb)
+    cpu.apu.cgb = cgb_hardware;
+    if (!sgb && !cgb_hardware)
     {
         load_boot_logo(cpu);
     }
@@ -316,6 +320,38 @@ bool load_cartridge(CPU_LR35902 &cpu, std::vector<uint8_t> rom, std::string &err
         cpu.memory[0xFF00] = 0xFF;
         cpu.div_cycle_accumulator = global_checksum == 0x96A7 ? 0xD84C : 0xD85C;
         cpu.memory[0xFF04] = 0xD8;
+        break;
+    case GameBoyModel::Cgb0:
+    case GameBoyModel::Cgb:
+    case GameBoyModel::Agb:
+        // The CGB boot ROM leaves A = $11 so games can tell they are on a
+        // CGB; the AGB's also sets bit 0 of B. The first CGB revision's boot
+        // ROM runs longer.
+        cpu.cgb_hardware = true;
+        cpu.cgb_mode = cgb_cartridge;
+        cpu.div_cycle_accumulator = model == GameBoyModel::Cgb0 ? 0x2880 : model == GameBoyModel::Agb ? 0x2678 : 0x2674;
+        cpu.memory[0xFF04] = static_cast<uint8_t>(cpu.div_cycle_accumulator >> 8);
+        cpu.memory[0xFF00] = 0xFF; // Both button groups deselected
+        // VBK reads $FE even in DMG compatibility mode, and the palette
+        // indices are left where the boot ROM's colourisation stopped.
+        cpu.bg_palette_index = 0x88;
+        cpu.obj_palette_index = 0x90;
+        cpu.af.reg16 = model == GameBoyModel::Agb ? 0x1100 : 0x1180;
+        cpu.bc.reg16 = model == GameBoyModel::Agb ? 0x0100 : 0x0000;
+        cpu.de.reg16 = cgb_cartridge ? 0xFF56 : 0x0008;
+        cpu.hl.reg16 = cgb_cartridge ? 0x000D : 0x007C;
+        cpu.wram_bank = 0;
+        if (cgb_cartridge)
+        {
+            // Palettes start white.
+            cpu.bg_palette_ram.fill(0xFF);
+            cpu.obj_palette_ram.fill(0xFF);
+            for (std::size_t index = 1; index < 64; index += 2)
+            {
+                cpu.bg_palette_ram[index] = 0x7F;
+                cpu.obj_palette_ram[index] = 0x7F;
+            }
+        }
         break;
     case GameBoyModel::DmgABC:
         break;
