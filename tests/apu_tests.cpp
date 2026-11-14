@@ -98,6 +98,21 @@ static void test_sample_output_while_powered_off()
     }
 }
 
+// Clock shifts 14 and 15 stop the noise channel's LFSR; 13 still clocks it.
+static void test_noise_clock_shift_14_stops_lfsr()
+{
+    for (const uint8_t shift : {13, 14, 15})
+    {
+        APU_LR35902 apu{};
+        apu_power_on_after_boot(apu, false);
+        apu_write(apu, 0xFF21, 0xF0); // Channel 4 DAC on
+        apu_write(apu, 0xFF22, static_cast<uint8_t>(shift << 4)); // Divider 0: 8 << shift cycles
+        apu_write(apu, 0xFF23, 0x80);
+        apu_tick(apu, (8 << 15) + 8);
+        assert((apu.channels[3].lfsr == 0x7FFF) == (shift >= 14));
+    }
+}
+
 int main()
 {
     test_register_read_masks();
@@ -106,5 +121,6 @@ int main()
     test_power_off_clears_registers();
     test_sample_output();
     test_sample_output_while_powered_off();
+    test_noise_clock_shift_14_stops_lfsr();
     return 0;
 }

@@ -183,6 +183,17 @@ static void test_cgb_speed_switch_and_dma()
     assert(cpu.double_speed && !cpu.stopped);
     assert(cpu_read(cpu, 0xFF4D) == 0xFE);
 
+    // The CPU then pauses for 2050 M-cycles, with DIV stopped.
+    const uint16_t pc = cpu.pc;
+    cpu_write(cpu, 0xFF04, 0);
+    for (int cycle = 0; cycle < 2050; ++cycle)
+    {
+        step_cpu(cpu);
+    }
+    assert(cpu.pc == pc && cpu.div_cycle_accumulator == 0 && cpu.speed_switch_cycles == 0);
+    step_cpu(cpu);
+    assert(cpu.pc == pc + 1);
+
     cpu_write(cpu, 0xFF51, 0x40); // From $4000
     cpu_write(cpu, 0xFF52, 0x00);
     cpu_write(cpu, 0xFF53, 0x01); // To $8100
@@ -223,6 +234,9 @@ static void test_hblank_dma_started_in_mode_0()
     assert(cpu.memory[0x8100] == 0x01 && cpu.memory[0x810F] == 0x10);
     assert(cpu.memory[0x8110] == 0x00);
     assert(cpu_read(cpu, 0xFF55) == 0x00); // One block left
+
+    cpu_write(cpu, 0xFF55, 0x00); // Stopping the copy takes the length written
+    assert(cpu_read(cpu, 0xFF55) == 0x80 && !cpu.hdma_hblank_active);
 }
 
 // The CGB has separate cartridge, WRAM, and VRAM buses, so OAM DMA only

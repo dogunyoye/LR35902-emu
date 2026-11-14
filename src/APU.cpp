@@ -583,6 +583,10 @@ void apu_tick(APU_LR35902 &apu, int cycles)
             default:
             {
                 channel.timer += noise_period(apu);
+                if ((reg(apu, 0xFF22) >> 4) >= 14)
+                {
+                    break; // Clock shifts 14 and 15 stop the LFSR.
+                }
                 const uint16_t bit = static_cast<uint16_t>((channel.lfsr ^ (channel.lfsr >> 1)) & 0x01);
                 channel.lfsr = static_cast<uint16_t>((channel.lfsr >> 1) | (bit << 14));
                 if ((reg(apu, 0xFF22) & 0x08) != 0)

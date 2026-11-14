@@ -10,7 +10,7 @@ namespace
 {
     constexpr char MAGIC[8] = {'L', 'R', '3', '5', '9', '0', '2', 'S'};
     // Bump whenever the saved fields change.
-    constexpr uint32_t VERSION = 7;
+    constexpr uint32_t VERSION = 8;
 
     class StateWriter
     {
@@ -238,6 +238,7 @@ namespace
         archive(cpu.cgb_mode);
         archive(cpu.double_speed);
         archive(cpu.speed_switch_armed);
+        archive(cpu.speed_switch_cycles);
         archive(cpu.vram_bank);
         archive(cpu.wram_bank);
         archive(cpu.vram_bank1);

@@ -387,6 +387,29 @@ static void test_window_pixel_insertion_at_line_end()
     }
 }
 
+// Line 0 shows mode 0 for its first dots after VBlank, but only HBlank raises
+// the mode 0 STAT interrupt.
+static void test_no_mode0_interrupt_as_line_0_starts()
+{
+    CPU_LR35902 cpu{};
+    PPU_LR35902 ppu{};
+    cpu.memory[0xFF40] = 0x91;
+    cpu.memory[0xFF41] = 0x08; // Mode 0 interrupt
+    update_ppu(cpu, ppu, 154 * 456 + 144 * 456); // Past the first frame, into VBlank
+    assert(ppu.mode == 1);
+    cpu.memory[0xFF0F] = 0;
+    while (ppu.mode != 2)
+    {
+        update_ppu(cpu, ppu, 1);
+    }
+    assert(cpu.memory[0xFF44] == 0 && (cpu.memory[0xFF0F] & 0x02) == 0);
+    while (ppu.mode != 0)
+    {
+        update_ppu(cpu, ppu, 1);
+    }
+    assert((cpu.memory[0xFF0F] & 0x02) != 0);
+}
+
 static void test_dmg_compatibility_colours()
 {
     std::vector<uint8_t> rom(0x8000, 0);
@@ -411,6 +434,7 @@ int main()
     test_cgb_tile_attributes_objects_and_priority();
     test_dmg_compatibility_colours();
     test_window_pixel_insertion_at_line_end();
+    test_no_mode0_interrupt_as_line_0_starts();
     test_ppu_window_composition();
     test_ppu_sprite_priority_palettes_flips_and_8x16();
     test_stat_mode_interrupt_edges();

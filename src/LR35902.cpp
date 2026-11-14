@@ -547,6 +547,7 @@ int execute_instruction(CPU_LR35902 &cpu)
             reset_divider(cpu);
             cpu.double_speed = !cpu.double_speed;
             cpu.speed_switch_armed = false;
+            cpu.speed_switch_cycles = 2050;
         }
         else
         {
@@ -1559,6 +1560,14 @@ int step_cpu(CPU_LR35902 &cpu)
         const int fixed_speed_cycles = cpu.double_speed ? 2 : 4;
         update_cartridge_rtc(cpu, fixed_speed_cycles);
         apu_tick_stopped(cpu.apu, fixed_speed_cycles);
+        return 4;
+    }
+
+    if (cpu.speed_switch_cycles > 0)
+    {
+        // The CPU pauses after switching speed, counting at the new speed.
+        --cpu.speed_switch_cycles;
+        tick_peripherals_while_switching_speed(cpu, 4);
         return 4;
     }
 

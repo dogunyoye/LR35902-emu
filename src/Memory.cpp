@@ -697,6 +697,13 @@ namespace
     }
 }
 
+void tick_peripherals_while_switching_speed(CPU_LR35902 &cpu, int cycles)
+{
+    update_cartridge_rtc(cpu, fixed_speed_cycles(cpu, cycles));
+    apu_tick(cpu.apu, fixed_speed_cycles(cpu, cycles));
+    tick_ppu(cpu, cycles);
+}
+
 void tick_peripherals(CPU_LR35902 &cpu, int cycles)
 {
     tick_cpu_side(cpu, cycles);
@@ -758,12 +765,14 @@ namespace
             {
                 break;
             }
+            cpu.hdma_blocks = static_cast<uint8_t>((value & 0x7F) + 1);
             if (cpu.hdma_hblank_active && (value & 0x80) == 0)
             {
-                cpu.hdma_hblank_active = false; // Stops the HBlank copy; FF55 then shows what was left.
+                // Stops the HBlank copy. The length written replaces what was
+                // left, so writing 0 then reads back $80.
+                cpu.hdma_hblank_active = false;
                 break;
             }
-            cpu.hdma_blocks = static_cast<uint8_t>((value & 0x7F) + 1);
             if ((value & 0x80) != 0)
             {
                 cpu.hdma_hblank_active = true;

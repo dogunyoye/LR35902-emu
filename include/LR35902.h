@@ -131,6 +131,8 @@ struct CPU_LR35902
     // as fast; STOP switches speed once armed.
     bool double_speed = false;
     bool speed_switch_armed = false;
+    // M-cycles left of the pause after a speed switch, while the CPU waits.
+    uint16_t speed_switch_cycles = 0;
     // VBK and SVBK. VRAM bank 0 and WRAM banks 0 and 1 live in memory.
     uint8_t vram_bank = 0;
     uint8_t wram_bank = 1;
@@ -221,6 +223,9 @@ uint16_t cpu_pop16(CPU_LR35902 &cpu);
 void update_timers(CPU_LR35902 &cpu, int cycles);
 void update_oam_dma(CPU_LR35902 &cpu, int cycles);
 void tick_peripherals(CPU_LR35902 &cpu, int cycles);
+// During the pause after a speed switch, DIV stops, so the timers, serial
+// port, and OAM DMA hold while the PPU, APU, and cartridge clock run.
+void tick_peripherals_while_switching_speed(CPU_LR35902 &cpu, int cycles);
 // Called as the PPU enters HBlank on a visible line, for the CGB's HBlank VRAM DMA.
 void cpu_hblank_started(CPU_LR35902 &cpu);
 // The DMG corrupts OAM when the CPU puts an address in $FE00-$FEFF on the bus

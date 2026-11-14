@@ -77,9 +77,11 @@ namespace
 
         // The mode 2 interrupt is raised as LY changes, before STAT reports
         // mode 2, and the mode 0 interrupt one dot before STAT reports mode 0.
-        const bool mode0_line = mode == 0 ||
+        // Line 0 starts from VBlank, and its first dots in mode 0 raise neither.
+        const bool line_0_start = ppu.line_start_hold && cpu.memory[LY] == 0;
+        const bool mode0_line = (mode == 0 && !line_0_start) ||
                                 (mode == 3 && ppu.cycles_into_line >= ppu.mode3_end - 1);
-        const bool mode2_line = mode == 2 || (ppu.line_start_hold && cpu.memory[LY] != 0);
+        const bool mode2_line = mode == 2 || (ppu.line_start_hold && !line_0_start);
         const bool stat_line = ppu.lcd_enabled &&
                                ((mode0_line && (stat & 0x08) != 0) ||
                                 ((mode == 1) && (stat & 0x10) != 0 && (cpu.memory[LY] != 144 || ppu.cycles_into_line >= 4)) ||
