@@ -64,16 +64,16 @@ Run a serial-reporting ROM test (for example, a CPU conformance ROM):
 
 MODEL is `dmg0`, `dmgABC`, `mgb`, `sgb`, `sgb2`, `cgb0`, `cgb`, or `agb`. By default (`auto`) cartridges that only run on the Game Boy Color run on a CGB and everything else on a DMG. The runner prints serial output and returns 0 when it sees `Passed`, 1 for `Failed`, or 2 if neither marker appears before the cycle limit (default: 50,000,000). It also recognises Mooneye's `LD B,B` register signatures and blargg's cartridge-RAM status at `$A000`. Pass `--screenshot out.ppm` before the ROM path to save the frame for screenshot tests such as dmg-acid2, cgb-acid2, and Mealybug Tearoom.
 
-Run the Mooneye, blargg, dmg-acid2, cgb-acid2, and Mealybug Tearoom suites together. The ROMs are not included in this repository; `tests/fetch_test_roms.sh` downloads pinned versions of them (about 100 MB) into `build/test-roms`:
+Run the Mooneye, blargg, dmg-acid2, cgb-acid2, Mealybug Tearoom, and SameSuite suites together. The ROMs are not included in this repository; `tests/fetch_test_roms.sh` downloads pinned versions of them (about 100 MB) into `build/test-roms`. SameSuite is published as source, so on Linux x86-64 the script also downloads a pinned [RGBDS](https://rgbds.gbdev.io) release to build it; elsewhere it skips SameSuite:
 
 ```sh
 tests/fetch_test_roms.sh
 tests/run_rom_suites.sh --roms build/test-roms
 ```
 
-Each suite can also be given on its own with `--mooneye`, `--blargg`, `--acid2`, `--cgb-acid2`, or `--mealybug`. Mooneye's tests run on the model their file names name; blargg's CPU and timing tests also run a second time on a CGB.
+Each suite can also be given on its own with `--mooneye`, `--blargg`, `--acid2`, `--cgb-acid2`, `--mealybug`, or `--samesuite`. Mooneye's tests run on the model their file names name; blargg's CPU and timing tests also run a second time on a CGB.
 
-This writes per-ROM logs and `results.tsv` to `build/rom-results`. The script exits 1 if any ROM fails that is not on its list of known failures, and 2 if a suite or the test runner is missing. The screenshot comparisons need Python with Pillow.
+This writes per-ROM logs and `results.tsv` to `build/rom-results`. The script exits 1 if any ROM fails that is not listed in `tests/rom_known_failures.tsv`, and 2 if a suite or the test runner is missing. The screenshot comparisons need Python with Pillow.
 
 ### Debug builds
 
@@ -180,7 +180,8 @@ Show usage/help:
 │   ├── controls_tests.cpp   # Key binding defaults and controls file parsing
 │   ├── rom_test_runner.cpp  # ROM conformance runner (serial, signatures, screenshots)
 │   ├── fetch_test_roms.sh   # Downloads the ROM test suites at pinned versions
-│   ├── run_rom_suites.sh    # Runs the Mooneye, blargg, acid2, and Mealybug suites
+│   ├── run_rom_suites.sh    # Runs the Mooneye, blargg, acid2, Mealybug, and SameSuite suites
+│   ├── rom_known_failures.tsv # ROM test failures expected for now
 │   └── compare_screenshot.py # Compares screenshots with DMG reference images
 └── build/               # Generated CMake build output
 ```

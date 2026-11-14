@@ -1,34 +1,38 @@
 #!/usr/bin/env bash
-# Run the Mooneye, blargg, dmg-acid2, cgb-acid2, and Mealybug Tearoom test ROMs through rom_test_runner.
+# Run the Mooneye, blargg, dmg-acid2, cgb-acid2, Mealybug Tearoom, and SameSuite test ROMs through rom_test_runner.
 #
 # Usage: tests/run_rom_suites.sh [-o OUTPUT_DIR] [--roms DIR] [--mooneye DIR] [--blargg DIR] [--acid2 DIR]
-#                                [--cgb-acid2 DIR] [--mealybug DIR]
-#   --roms DIR      all five suites, as downloaded by tests/fetch_test_roms.sh
+#                                [--cgb-acid2 DIR] [--mealybug DIR] [--samesuite DIR]
+#   --roms DIR      the suites downloaded by tests/fetch_test_roms.sh (SameSuite
+#                   only if it was built there)
 #   --mooneye DIR   extracted mooneye-test-suite release (contains acceptance/)
 #   --blargg DIR    gb-test-roms checkout (contains cpu_instrs/)
 #   --acid2 DIR     dmg-acid2 checkout with dmg-acid2.gb built or downloaded into it
 #   --cgb-acid2 DIR cgb-acid2 checkout with cgb-acid2.gbc built or downloaded into it
 #   --mealybug DIR  mealybug-tearoom-tests checkout (its ROM zip is unpacked into OUTPUT_DIR)
+#   --samesuite DIR SameSuite checkout with its ROMs built
 # Writes one log per ROM and results.tsv to OUTPUT_DIR (default: build/rom-results).
-# Exits 1 if a ROM fails that is not in KNOWN_FAILURES below, and 2 on a usage
-# error, such as a missing suite folder.
+# Exits 1 if a ROM fails that is not in tests/rom_known_failures.tsv, and 2 on a
+# usage error, such as a missing suite folder.
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 RUNNER=${RUNNER:-$ROOT/build/rom_test_runner}
 out=$ROOT/build/rom-results
-mooneye= blargg= acid2= cgb_acid2= mealybug=
+mooneye= blargg= acid2= cgb_acid2= mealybug= samesuite=
 while [ $# -gt 0 ]; do
   case $1 in
     -o) out=$2; shift 2 ;;
     --roms)
       mooneye=$2/mooneye blargg=$2/blargg acid2=$2/dmg-acid2 cgb_acid2=$2/cgb-acid2 mealybug=$2/mealybug
+      [ ! -d "$2/samesuite" ] || samesuite=$2/samesuite
       shift 2 ;;
     --mooneye) mooneye=$2; shift 2 ;;
     --blargg) blargg=$2; shift 2 ;;
     --acid2) acid2=$2; shift 2 ;;
     --cgb-acid2) cgb_acid2=$2; shift 2 ;;
     --mealybug) mealybug=$2; shift 2 ;;
+    --samesuite) samesuite=$2; shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -37,7 +41,7 @@ usage_error() {
   echo "run_rom_suites.sh: $1" >&2
   exit 2
 }
-if [ -z "$mooneye$blargg$acid2$cgb_acid2$mealybug" ]; then
+if [ -z "$mooneye$blargg$acid2$cgb_acid2$mealybug$samesuite" ]; then
   usage_error "no suites given. Download them with tests/fetch_test_roms.sh, then pass --roms build/test-roms."
 fi
 require() {
@@ -48,22 +52,14 @@ require() {
 [ -z "$acid2" ] || require "dmg-acid2 ROM" "$acid2/dmg-acid2.gb"
 [ -z "$cgb_acid2" ] || require "cgb-acid2 ROM" "$cgb_acid2/cgb-acid2.gbc"
 [ -z "$mealybug" ] || require "Mealybug ROMs" "$mealybug/mealybug-tearoom-tests.zip"
+[ -z "$samesuite" ] || require "SameSuite ROMs" "$samesuite/dma/hdma_mode0.gb"
 [ -x "$RUNNER" ] || usage_error "no test runner at $RUNNER. Build the project first (cmake --build build)."
 if [ -n "$acid2$cgb_acid2$mealybug" ] && ! python3 -c 'import PIL' 2>/dev/null; then
   usage_error "the screenshot tests need Python 3 with Pillow (pip install Pillow)."
 fi
 
 # Results other than PASS that are expected for now.
-KNOWN_FAILURES=$(cat <<'END'
-FAIL	mealybug	m3_lcdc_obj_en_change_variant.gb
-FAIL	mealybug	m3_lcdc_obj_size_change.gb
-FAIL	mealybug	m3_lcdc_obj_size_change_scx.gb
-FAIL	mealybug	m3_lcdc_win_en_change_multiple_wx.gb
-FAIL	mealybug	m3_scx_low_3_bits.gb
-FAIL	mealybug	m3_window_timing_wx_0.gb
-NORESULT	mooneye	madness/mgb_oam_dma_halt_sprites.gb
-END
-)
+KNOWN_FAILURES=$(grep -v '^#' "$ROOT/tests/rom_known_failures.tsv")
 
 mkdir -p "$out"
 
@@ -93,7 +89,14 @@ run_one() {
   esac
   printf '%s\t%s\t%s\n' "$result" "$suite" "$relative"
 }
-export -f run_one model_for
+samesuite_model() {
+  case "$1" in
+    *-A.gb) echo agb ;;
+    *-cgb0*) echo cgb0 ;;
+    *) echo cgb ;;
+  esac
+}
+export -f run_one model_for samesuite_model
 export RUNNER out
 
 {
@@ -145,6 +148,13 @@ export RUNNER out
         printf 'FAIL\tmealybug\t%s.gb\n' "$name"
       fi
     done
+  fi
+  if [ -n "$samesuite" ]; then
+    # Tests for one CGB revision name it; the rest target the latest CGB. The
+    # SGB tests need SGB command support, which the emulator does not have.
+    find "$samesuite" -name '*.gb' ! -path '*/sgb/*' -print0 |
+      xargs -0 -P 8 -I{} bash -c 'run_one samesuite "$1" "$(samesuite_model "$(basename "$1")")" 100000000 "$2"' _ {} \
+        "$samesuite"
   fi
 } | sort -k1,1 -k2,2 -k3,3 >"$out/results.tsv"
 

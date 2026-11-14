@@ -1,0 +1,84 @@
+# ROM test results other than PASS that are expected for now, one per line as
+# RESULT<TAB>SUITE<TAB>ROM. run_rom_suites.sh fails on any other result.
+
+# Mid-line LCDC, SCX, and window changes the PPU does not yet time exactly.
+FAIL	mealybug	m3_lcdc_obj_en_change_variant.gb
+FAIL	mealybug	m3_lcdc_obj_size_change.gb
+FAIL	mealybug	m3_lcdc_obj_size_change_scx.gb
+FAIL	mealybug	m3_lcdc_win_en_change_multiple_wx.gb
+FAIL	mealybug	m3_scx_low_3_bits.gb
+FAIL	mealybug	m3_window_timing_wx_0.gb
+NORESULT	mooneye	madness/mgb_oam_dma_halt_sprites.gb
+
+# SameSuite APU tests read the PCM12 and PCM34 registers, which always read 0.
+FAIL	samesuite	apu/channel_1/channel_1_align.gb
+FAIL	samesuite	apu/channel_1/channel_1_align_cpu.gb
+FAIL	samesuite	apu/channel_1/channel_1_delay.gb
+FAIL	samesuite	apu/channel_1/channel_1_duty.gb
+FAIL	samesuite	apu/channel_1/channel_1_duty_delay.gb
+FAIL	samesuite	apu/channel_1/channel_1_freq_change.gb
+FAIL	samesuite	apu/channel_1/channel_1_freq_change_timing-A.gb
+FAIL	samesuite	apu/channel_1/channel_1_freq_change_timing-cgb0BC.gb
+FAIL	samesuite	apu/channel_1/channel_1_freq_change_timing-cgbDE.gb
+FAIL	samesuite	apu/channel_1/channel_1_nrx2_glitch.gb
+FAIL	samesuite	apu/channel_1/channel_1_nrx2_speed_change.gb
+FAIL	samesuite	apu/channel_1/channel_1_restart.gb
+FAIL	samesuite	apu/channel_1/channel_1_restart_nrx2_glitch.gb
+FAIL	samesuite	apu/channel_1/channel_1_stop_div.gb
+FAIL	samesuite	apu/channel_1/channel_1_stop_restart.gb
+FAIL	samesuite	apu/channel_1/channel_1_sweep.gb
+FAIL	samesuite	apu/channel_1/channel_1_sweep_restart.gb
+FAIL	samesuite	apu/channel_1/channel_1_volume.gb
+FAIL	samesuite	apu/channel_1/channel_1_volume_div.gb
+FAIL	samesuite	apu/channel_2/channel_2_align.gb
+FAIL	samesuite	apu/channel_2/channel_2_align_cpu.gb
+FAIL	samesuite	apu/channel_2/channel_2_delay.gb
+FAIL	samesuite	apu/channel_2/channel_2_duty.gb
+FAIL	samesuite	apu/channel_2/channel_2_duty_delay.gb
+FAIL	samesuite	apu/channel_2/channel_2_freq_change.gb
+FAIL	samesuite	apu/channel_2/channel_2_nrx2_glitch.gb
+FAIL	samesuite	apu/channel_2/channel_2_nrx2_speed_change.gb
+FAIL	samesuite	apu/channel_2/channel_2_restart.gb
+FAIL	samesuite	apu/channel_2/channel_2_restart_nrx2_glitch.gb
+FAIL	samesuite	apu/channel_2/channel_2_stop_div.gb
+FAIL	samesuite	apu/channel_2/channel_2_stop_restart.gb
+FAIL	samesuite	apu/channel_2/channel_2_volume.gb
+FAIL	samesuite	apu/channel_2/channel_2_volume_div.gb
+FAIL	samesuite	apu/channel_3/channel_3_and_glitch.gb
+FAIL	samesuite	apu/channel_3/channel_3_delay.gb
+FAIL	samesuite	apu/channel_3/channel_3_first_sample.gb
+FAIL	samesuite	apu/channel_3/channel_3_freq_change_delay.gb
+FAIL	samesuite	apu/channel_3/channel_3_restart_delay.gb
+FAIL	samesuite	apu/channel_3/channel_3_restart_during_delay.gb
+FAIL	samesuite	apu/channel_3/channel_3_restart_stop_delay.gb
+FAIL	samesuite	apu/channel_3/channel_3_shift_delay.gb
+FAIL	samesuite	apu/channel_3/channel_3_shift_skip_delay.gb
+FAIL	samesuite	apu/channel_3/channel_3_stop_div.gb
+FAIL	samesuite	apu/channel_3/channel_3_wave_ram_sync.gb
+FAIL	samesuite	apu/channel_4/channel_4_align.gb
+FAIL	samesuite	apu/channel_4/channel_4_delay.gb
+FAIL	samesuite	apu/channel_4/channel_4_equivalent_frequencies.gb
+FAIL	samesuite	apu/channel_4/channel_4_freq_change.gb
+FAIL	samesuite	apu/channel_4/channel_4_frequency_alignment.gb
+FAIL	samesuite	apu/channel_4/channel_4_lfsr.gb
+FAIL	samesuite	apu/channel_4/channel_4_lfsr15.gb
+FAIL	samesuite	apu/channel_4/channel_4_lfsr_15_7.gb
+FAIL	samesuite	apu/channel_4/channel_4_lfsr_7_15.gb
+FAIL	samesuite	apu/channel_4/channel_4_lfsr_restart.gb
+FAIL	samesuite	apu/channel_4/channel_4_lfsr_restart_fast.gb
+FAIL	samesuite	apu/channel_4/channel_4_volume_div.gb
+FAIL	samesuite	apu/div_trigger_volume_10.gb
+FAIL	samesuite	apu/div_write_trigger_volume.gb
+FAIL	samesuite	apu/div_write_trigger_volume_10.gb
+
+# SameSuite tests for particular CGB revisions.
+FAIL	samesuite	apu/channel_1/channel_1_extra_length_clocking-cgb0B.gb
+FAIL	samesuite	apu/channel_2/channel_2_extra_length_clocking-cgb0B.gb
+FAIL	samesuite	apu/channel_3/channel_3_extra_length_clocking-cgb0.gb
+FAIL	samesuite	apu/channel_3/channel_3_extra_length_clocking-cgbB.gb
+FAIL	samesuite	apu/channel_4/channel_4_extra_length_clocking-cgb0B.gb
+
+# Other SameSuite tests not yet passing.
+FAIL	samesuite	apu/channel_1/channel_1_sweep_restart_2.gb
+FAIL	samesuite	apu/div_write_trigger_10.gb
+NORESULT	samesuite	interrupt/ei_delay_halt.gb
